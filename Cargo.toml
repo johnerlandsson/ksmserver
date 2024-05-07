@@ -3,3 +3,5 @@
 members = [
 	"ksmparser", "ksmserver",
 ]
+
+resolver = "2"
