@@ -1,2 +1,4 @@
 Cargo.lock
 target
+output.csv
+.~lock.output.csv#
