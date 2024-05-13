@@ -101,12 +101,12 @@ fn align_and_insert_row(
 /// * `values` - A string containing corresponding values separated by tabs.
 ///
 /// # Returns
-/// * `Result<DataFrame, PolarsError>` - Returns a DataFrame constructed from the provided columns and values if successful.
+/// * `PolarsResult<DataFrame>` - Returns a DataFrame constructed from the provided columns and values if successful.
 ///   Returns a `PolarsError` if the DataFrame could not be successfully constructed (e.g., mismatch in the number of columns and values).
 fn create_dataframe_from_columns_and_values(
     columns: &str,
     values: &str,
-) -> Result<DataFrame, PolarsError> {
+) -> PolarsResult<DataFrame> { 
     let columns_vec: Vec<&str> = columns.split("\t").collect();
     let values_vec: Vec<&str> = values.split("\t").collect();
 
@@ -148,7 +148,7 @@ fn create_dataframe_from_columns_and_values(
 /// A `Result` that is either:
 /// - `Ok(Series)` - A new Series with the parsed value if successful.
 /// - `Err(PolarsError)` - An error if the parsing fails.
-fn parse_series(column: &str, value: &str, data_type: &DataType) -> Result<Series, PolarsError> {
+fn parse_series(column: &str, value: &str, data_type: &DataType) -> PolarsResult<Series> { 
     match data_type {
         // If data type is Float64, attempt to parse the string `value` into a f64.
         DataType::Float64 => {
@@ -236,6 +236,7 @@ fn read_measurement_entries(
     let mut dataframe = DataFrame::default();
 
     loop {
+        //Read columns row into string
         let column_row = match lines_res.next() {
             Some(Ok(line)) => line,
             Some(Err(e)) => return Err(ParseError::IOError(e.to_string())),
@@ -247,16 +248,14 @@ fn read_measurement_entries(
             break;
         }
 
-        let values_row = match lines_res.next() {
-            Some(line) => line,
-            None => return Err(ParseError::MalformedEntry(column_row)),
-        };
-
-        let values_row = match values_row {
-            Ok(line) => line,
+        //Read values row into string
+        let values_row = match lines_res.next().transpose() {
+            Ok(Some(line)) => line,
+            Ok(None) => return Err(ParseError::MalformedEntry(column_row)),
             Err(e) => return Err(ParseError::IOError(e.to_string())),
         };
 
+        //Split the column and value stings and create a dataframe with a single row
         let mut new_row = match create_dataframe_from_columns_and_values(&column_row, &values_row) {
             Ok(df) => df,
             Err(e) => return Err(ParseError::MalformedEntry(format!("{:?}", e))),

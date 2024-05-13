@@ -3,3 +3,4 @@ target
 output.csv
 .~lock.output.csv#
 testdata
+ksmparser/src/.measurement.rs.swp
