@@ -1,9 +1,9 @@
-//use ksmparser::article::parse_art_file;
 use chrono::NaiveDate;
 use ksmparser::measurement::parse_dat_file;
 use polars::prelude::*;
 use polars_io::json::JsonWriter;
 use serde::Deserialize;
+use std::fmt;
 use std::io::Cursor;
 use tide::{Request, Response, StatusCode};
 
@@ -53,57 +53,89 @@ fn plain_response(code: StatusCode, msg: &str) -> tide::Response {
         .build()
 }
 
-enum KSMErrors {
-    DateCreationError,
-    DataFrameFilterError,
+enum KSMError {
+    DateCreationError { date: String, reason: String },
+}
+
+impl fmt::Display for KSMError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            KSMError::DateCreationError { ref date, ref reason } => {
+                write!(f, "Error creating date '{}': {}", date, reason)
+            }
+        }
+    }
 }
 
 fn filter_dataframe_by_measure_time(
     dataframe: DataFrame,
     start_date: NaiveDate,
     end_date: NaiveDate,
-) -> Result<LazyFrame, KSMErrors> {
-    let start = match start_date.and_hms_opt(0, 0, 0) {
-        Some(dt) => dt.and_utc().timestamp(),
-        None => return Err(KSMErrors::DateCreationError),
-    };
-    let end = match end_date.and_hms_opt(23, 59, 59) {
-        Some(dt) => dt.and_utc().timestamp(),
-        None => return Err(KSMErrors::DateCreationError),
-    };
+) -> Result<LazyFrame, KSMError> {
+    // Convert the start date to a timestamp at the beginning of the day (midnight)
+    let start = start_date
+        .and_hms_opt(0, 0, 0)
+        .map(|dt| dt.and_utc().timestamp())
+        .ok_or_else(|| KSMError::DateCreationError {
+            date: start_date.to_string(),
+            reason: "Invalid start date time combination".to_string(),
+        })?;
 
+    // Convert the end date to a timestamp at the end of the day (one second before midnight)
+    let end = end_date
+        .and_hms_opt(23, 59, 59)
+        .map(|dt| dt.and_utc().timestamp())
+        .ok_or_else(|| KSMError::DateCreationError {
+            date: start_date.to_string(),
+            reason: "Invalid end date time combination".to_string(),
+        })?;
+
+
+    // Create filter expressions for data after the start date and before the end date
     let start = col("measure_time1970").gt_eq(start);
     let end = col("measure_time1970").lt_eq(end);
 
+    // Apply filter and lazily load results
     Ok(dataframe.lazy().filter(start.and(end)))
 }
 
-fn select_dataframe_columns(dataframe: LazyFrame ,columns: &str) -> Result<DataFrame, PolarsError> {
+fn select_dataframe_columns(dataframe: LazyFrame, columns: &str) -> Result<DataFrame, PolarsError> {
+    // Split the input string by commas and collect into a vector of column names
     let column_names: Vec<&str> = columns.split(',').collect::<Vec<&str>>();
 
+    // If no columns were specified, return the entire DataFrame as is
     if column_names.is_empty() {
         return dataframe.collect();
     }
 
+    // Create a vector of column selection expressions based on column names
     let column_expressions: Vec<Expr> = column_names.iter().map(|&name| col(name)).collect();
+
+    // Use the column expressions to select specified columns from the LazyFrame and collect the result into a DataFrame
     dataframe.select(column_expressions).collect()
 }
 
+// Defines a structure to parse query parameters from a request.
 #[derive(Deserialize, Debug)]
 struct MeasurementQuery {
-    start_date: Option<NaiveDate>,
-    end_date: Option<NaiveDate>,
-    columns: Option<String>,
+    start_date: Option<NaiveDate>,  // Optional start date for filtering dataframe
+    end_date: Option<NaiveDate>,    // Optional end date for filtering dataframe
+    columns: Option<String>,        // Optional comma-separated string of columns to select
 }
 async fn measurement(req: Request<()>) -> tide::Result {
+    // Deserialize the query parameters into the MeasurementQuery struct
     let query: MeasurementQuery = req.query()?;
+    
+    // Extract the filename parameter from the request path and format it with directory structure
     let filename: String = match req.param("name") {
         Ok(file) => format!("testdata/dat/{}.dat", file),
         Err(_) => {
+            // Return a BadRequest response if filename parameter is missing or incorrect
             return Ok(plain_response(StatusCode::BadRequest, "Invalid parameter"));
         }
     };
 
+    // Attempt to parse the .dat file based on the given filename
     let dataframe = match parse_dat_file(filename.as_str()) {
         Ok(df) => df,
         Err(e) => {
@@ -112,26 +144,41 @@ async fn measurement(req: Request<()>) -> tide::Result {
         }
     };
 
+    // Filter the dataframe by measure time using provided start and end dates
     let dataframe = match filter_dataframe_by_measure_time(
         dataframe,
         query.start_date.unwrap_or(NaiveDate::MIN),
         query.end_date.unwrap_or(NaiveDate::MAX),
     ) {
         Ok(df) => df,
-        Err(_) => {
+        Err(e) => {
+            // Return InternalServerError if there is an error in filtering
             return Ok(plain_response(
                 StatusCode::InternalServerError,
-                "Failed to filter result by \"measure_time1970\"",
+                e.to_string().as_str(),
             ))
         }
     };
 
-    let mut dataframe = if let Some(columns) = query.columns {
-        select_dataframe_columns(dataframe ,columns.as_str()).unwrap()
-    } else {
-        dataframe.collect().unwrap()
+    // Process the optional column filtering
+    let column_string = query.columns.unwrap_or_default();
+    let mut dataframe = match select_dataframe_columns(dataframe, column_string.as_str()) {
+        Ok(df) => df,
+        Err(e) => match e {
+            PolarsError::ColumnNotFound(..) => {
+                // Return BadRequest if specified column doesn't exist
+                return Ok(plain_response(StatusCode::BadRequest, "Column not found"));
+            }
+            _ => {
+                // Return InternalServerError for other column-related errors
+                return Ok(plain_response(
+                    StatusCode::InternalServerError,
+                    format!("Column errror {:?}", e.to_string()).as_str(),
+                ));
+            }
+        },
     };
 
-
+    // Convert the final dataframe to JSON and use it as the response
     Ok(dataframe_to_json_response(&mut dataframe))
 }
