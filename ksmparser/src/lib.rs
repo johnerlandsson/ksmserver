@@ -49,6 +49,8 @@ pub enum ParseError {
 
     DataFrameCreationError,
 
+    SeriesCreationError,
+
     DataAlignmentError,
 }
 
@@ -72,6 +74,9 @@ impl fmt::Display for ParseError {
             }
             ParseError::DataFrameCreationError => {
                 write!(f, "Failed to create new row")
+            }
+            ParseError::SeriesCreationError => {
+                write!(f, "Failed to create new column")
             }
             ParseError::DataAlignmentError => {
                 write!(f, "Failed to align or insert row")

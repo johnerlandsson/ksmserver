@@ -4,34 +4,39 @@
 ///
 /// Functions included handle reading from files, parsing content, and validating
 /// program names and key-value pair arrangements within the given article files.
-
 use super::ParseError;
 use crate::read_and_decode_lines;
-use std::collections::HashMap;
-use std::path::Path;
+use polars::prelude::*;
 use std::io;
+use std::path::Path;
 
-/// Parses parameters from article content represented as an iterator over results of strings.
+/// Parses article parameters from an iterator over lines of text, producing a DataFrame.
 ///
-/// This function expects the first result to contain a valid program name from predefined
-/// `PROGRAM_NAMES`. It then checks for a specific "None" result, followed by several
-/// key-value pairs. Each key-value pair should be in the format "key = value".
+/// This function reads through lines of text provided by an `impl Iterator<Item = io::Result<String>>`
+/// interpreting them to extract a number of predefined parameters into a `DataFrame`. The expected format
+/// for the input includes specific key-value pairs divided by "=", and certain mandatory items such as the
+/// program name.
 ///
 /// # Parameters
-/// - `line_res`: An iterator over `io::Result<String>`, where each item represents a line from the article,
-///   potentially including I/O errors.
+/// - `mut line_res`: An iterator over IO results of strings, where each string represents a line of text
+///   from the source input. The iterator can yield IO errors which are propagated as `ParseError`.
 ///
 /// # Returns
-/// A `Result` wrapping a `HashMap<String, String>` where each entry corresponds to a key-value pair found
-/// in the article file. Returns `ParseError` on failure with an appropriate error message,
-/// indicating whether a program name is invalid, a required line is missing, or a line is malformed.
+/// This function returns a `Result<DataFrame, ParseError>`. If the parsing completes successfully without
+/// encountering format or IO errors, it returns `Ok(DataFrame)` where `DataFrame` contains the parsed
+/// data. If errors are encountered (e.g., IO issues, missing mandatory fields, malformatted entries),
+/// a `ParseError` is returned to indicate the failure.
 ///
 /// # Errors
-/// - `MissingField`: If the "None" line or the program name is missing.
-/// - `MalformedEntry`: If any line doesn't comply with the "key = value" format.
-/// - `IOError`: If there is an I/O error reading any line.
-fn read_article_parameters(mut line_res: impl Iterator<Item = io::Result<String>>) -> Result<HashMap<String, String>, ParseError> {
-    let mut parameters = HashMap::new(); // Create a new HashMap to store article parameters
+/// The function can return the following errors:
+/// - `ParseError::IOError(String)`: When the function encounters an IO error from the input iterator.
+/// - `ParseError::MissingField(String)`: If a required field such as the "pgm_name" or a "None" terminator is missing.
+/// - `ParseError::SeriesCreationError`: If there is an error adding a new Series to the DataFrame.
+/// - `ParseError::MalformedEntry(String)`: If a line cannot be parsed into a valid key-value format.
+fn read_article_parameters(
+    mut line_res: impl Iterator<Item = io::Result<String>>,
+) -> Result<DataFrame, ParseError> {
+    let mut dataframe = DataFrame::default();
 
     // Check if the first line (expected to be the program name) exists and validate it
     match line_res.next() {
@@ -39,8 +44,11 @@ fn read_article_parameters(mut line_res: impl Iterator<Item = io::Result<String>
             // Trim whitespace from the program name
             let pgm_name = pgm_name.trim();
             // Store the valid program name in the parameters map and remove it from the lines
-            parameters.insert(String::from("pgm_name"), String::from(pgm_name));
-        },
+            let series = Series::new("pgm_name", &[pgm_name]);
+            dataframe = dataframe
+                .hstack(&[series])
+                .map_err(|_| ParseError::SeriesCreationError)?;
+        }
         Some(Err(e)) => return Err(ParseError::IOError(e.to_string())),
         None => return Err(ParseError::MissingField(String::from("pgm_name"))),
     }
@@ -52,10 +60,11 @@ fn read_article_parameters(mut line_res: impl Iterator<Item = io::Result<String>
             if line.trim() != "None" {
                 return Err(ParseError::MissingField("None".to_string()));
             }
-        },
+        }
         Some(Err(e)) => return Err(ParseError::IOError(e.to_string())),
         None => return Err(ParseError::IOError("Reading none line".to_string())),
     }
+
     // Iterate over the remaining lines to parse key-value pairs
     for line in line_res {
         let line = match line {
@@ -70,7 +79,10 @@ fn read_article_parameters(mut line_res: impl Iterator<Item = io::Result<String>
         match line.split_once(" = ") {
             Some((key, value)) => {
                 // Trim and insert the parsed key and value into the parameters map
-                parameters.insert(key.trim().to_string(), value.trim().to_string());
+                let series = Series::new(key.trim(), &[value.trim()]);
+                dataframe = dataframe
+                    .hstack(&[series])
+                    .map_err(|_| ParseError::SeriesCreationError)?;
             }
             None => {
                 // Return an error if a line does not contain a valid key-value format
@@ -79,10 +91,8 @@ fn read_article_parameters(mut line_res: impl Iterator<Item = io::Result<String>
         }
     }
 
-    // Return the parsed parameters on success
-    Ok(parameters)
+    Ok(dataframe)
 }
-
 
 /// Parses an article file from the specified path.
 ///
@@ -105,14 +115,11 @@ fn read_article_parameters(mut line_res: impl Iterator<Item = io::Result<String>
 /// - Additionally includes all errors thrown by `read_article_parameters`.
 pub fn parse_art_file<P: AsRef<Path> + std::fmt::Display + Copy>(
     file_path: P,
-) -> Result<HashMap<String, String>, ParseError> {
+) -> Result<DataFrame, ParseError> {
     match read_and_decode_lines(file_path) {
         // Attempt to read article parameters from the decoded lines
-        Ok(lines) => {
-            read_article_parameters(lines)
-        },
+        Ok(lines) => read_article_parameters(lines),
         // Return an error if the file could not be read and decoded
-        Err(_) => Err(ParseError::InvalidFile(file_path.to_string()))
+        Err(_) => Err(ParseError::InvalidFile(file_path.to_string())),
     }
 }
-

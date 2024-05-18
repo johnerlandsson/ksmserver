@@ -1,4 +1,5 @@
 use chrono::NaiveDate;
+use ksmparser::article::parse_art_file;
 use ksmparser::measurement::parse_dat_file;
 use polars::prelude::*;
 use polars_io::json::JsonWriter;
@@ -13,6 +14,7 @@ async fn main() -> tide::Result<()> {
     let mut server = tide::new();
 
     server.at("/measurement/:name").get(measurement);
+    server.at("/parameters/:name").get(parameters);
 
     server.listen("127.0.0.1:8080").await?;
 
@@ -60,7 +62,10 @@ enum KSMError {
 impl fmt::Display for KSMError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
-            KSMError::DateCreationError { ref date, ref reason } => {
+            KSMError::DateCreationError {
+                ref date,
+                ref reason,
+            } => {
                 write!(f, "Error creating date '{}': {}", date, reason)
             }
         }
@@ -90,7 +95,6 @@ fn filter_dataframe_by_measure_time(
             reason: "Invalid end date time combination".to_string(),
         })?;
 
-
     // Create filter expressions for data after the start date and before the end date
     let start = col("measure_time1970").gt_eq(start);
     let end = col("measure_time1970").lt_eq(end);
@@ -118,14 +122,14 @@ fn select_dataframe_columns(dataframe: LazyFrame, columns: &str) -> Result<DataF
 // Defines a structure to parse query parameters from a request.
 #[derive(Deserialize, Debug)]
 struct MeasurementQuery {
-    start_date: Option<NaiveDate>,  // Optional start date for filtering dataframe
-    end_date: Option<NaiveDate>,    // Optional end date for filtering dataframe
-    columns: Option<String>,        // Optional comma-separated string of columns to select
+    start_date: Option<NaiveDate>, // Optional start date for filtering dataframe
+    end_date: Option<NaiveDate>,   // Optional end date for filtering dataframe
+    columns: Option<String>,       // Optional comma-separated string of columns to select
 }
 async fn measurement(req: Request<()>) -> tide::Result {
     // Deserialize the query parameters into the MeasurementQuery struct
     let query: MeasurementQuery = req.query()?;
-    
+
     // Extract the filename parameter from the request path and format it with directory structure
     let filename: String = match req.param("name") {
         Ok(file) => format!("testdata/dat/{}.dat", file),
@@ -156,7 +160,7 @@ async fn measurement(req: Request<()>) -> tide::Result {
             return Ok(plain_response(
                 StatusCode::InternalServerError,
                 e.to_string().as_str(),
-            ))
+            ));
         }
     };
 
@@ -181,4 +185,25 @@ async fn measurement(req: Request<()>) -> tide::Result {
 
     // Convert the final dataframe to JSON and use it as the response
     Ok(dataframe_to_json_response(&mut dataframe))
+}
+
+async fn parameters(req: Request<()>) -> tide::Result {
+    // Extract the filename parameter from the request path and format it with directory structure
+    let filename: String = match req.param("name") {
+        Ok(file) => format!("testdata/art/{}.art", file),
+        Err(_) => {
+            // Return a BadRequest response if filename parameter is missing or incorrect
+            return Ok(plain_response(StatusCode::BadRequest, "Invalid parameter"));
+        }
+    };
+
+    let dataframe = match parse_art_file(filename.as_str()) {
+        Ok(df) => df,
+        Err(_) => {
+            return Ok(plain_response(StatusCode::InternalServerError, ""));
+        }
+    };
+    dbg!(dataframe);
+
+    Ok(plain_response(StatusCode::Ok, ""))
 }
