@@ -62,7 +62,7 @@ fn filter_dataframe_by_measure_time(
     dataframe: DataFrame,
     start_date: NaiveDate,
     end_date: NaiveDate,
-) -> Result<DataFrame, KSMErrors> {
+) -> Result<LazyFrame, KSMErrors> {
     let start = match start_date.and_hms_opt(0, 0, 0) {
         Some(dt) => dt.and_utc().timestamp(),
         None => return Err(KSMErrors::DateCreationError),
@@ -75,17 +75,25 @@ fn filter_dataframe_by_measure_time(
     let start = col("measure_time1970").gt_eq(start);
     let end = col("measure_time1970").lt_eq(end);
 
-    match dataframe.lazy().filter(start.and(end)).collect() {
-        Ok(df) => Ok(df),
-        Err(_) => Err(KSMErrors::DataFrameFilterError),
+    Ok(dataframe.lazy().filter(start.and(end)))
+}
+
+fn select_dataframe_columns(dataframe: LazyFrame ,columns: &str) -> Result<DataFrame, PolarsError> {
+    let column_names: Vec<&str> = columns.split(',').collect::<Vec<&str>>();
+
+    if column_names.is_empty() {
+        return dataframe.collect();
     }
+
+    let column_expressions: Vec<Expr> = column_names.iter().map(|&name| col(name)).collect();
+    dataframe.select(column_expressions).collect()
 }
 
 #[derive(Deserialize, Debug)]
 struct MeasurementQuery {
     start_date: Option<NaiveDate>,
     end_date: Option<NaiveDate>,
-    columns: Option<Vec<String>>,
+    columns: Option<String>,
 }
 async fn measurement(req: Request<()>) -> tide::Result {
     let query: MeasurementQuery = req.query()?;
@@ -104,8 +112,7 @@ async fn measurement(req: Request<()>) -> tide::Result {
         }
     };
 
-    println!("Before {}x{}", dataframe.height(), dataframe.width());
-    let mut dataframe = match filter_dataframe_by_measure_time(
+    let dataframe = match filter_dataframe_by_measure_time(
         dataframe,
         query.start_date.unwrap_or(NaiveDate::MIN),
         query.end_date.unwrap_or(NaiveDate::MAX),
@@ -119,16 +126,12 @@ async fn measurement(req: Request<()>) -> tide::Result {
         }
     };
 
-    let columns: Vec<String> = query.columns.unwrap_or_else(
-        dataframe
-            .get_column_names()
-            .iter()
-            .map(|s| s.to_string())
-            .collect::<Vec<_>>(),
-    );
-    println!("{:?}", columns);
+    let mut dataframe = if let Some(columns) = query.columns {
+        select_dataframe_columns(dataframe ,columns.as_str()).unwrap()
+    } else {
+        dataframe.collect().unwrap()
+    };
 
-    println!("After {}x{}", dataframe.height(), dataframe.width());
 
     Ok(dataframe_to_json_response(&mut dataframe))
 }
