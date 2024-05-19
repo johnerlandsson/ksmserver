@@ -104,13 +104,13 @@ fn filter_dataframe_by_measure_time(
 }
 
 fn select_dataframe_columns(dataframe: LazyFrame, columns: &str) -> Result<DataFrame, PolarsError> {
-    // Split the input string by commas and collect into a vector of column names
-    let column_names: Vec<&str> = columns.split(',').collect::<Vec<&str>>();
-
-    // If no columns were specified, return the entire DataFrame as is
-    if column_names.is_empty() {
+    //Assume all columns if columns string is empty
+    if columns.is_empty() {
         return dataframe.collect();
     }
+
+    // Split the input string by commas and collect into a vector of column names
+    let column_names: Vec<&str> = columns.split(',').collect::<Vec<&str>>();
 
     // Create a vector of column selection expressions based on column names
     let column_expressions: Vec<Expr> = column_names.iter().map(|&name| col(name)).collect();
@@ -203,7 +203,24 @@ async fn parameters(req: Request<()>) -> tide::Result {
             return Ok(plain_response(StatusCode::InternalServerError, ""));
         }
     };
-    dbg!(dataframe);
 
-    Ok(plain_response(StatusCode::Ok, ""))
+    let column_string = String::default();
+    let mut dataframe = match select_dataframe_columns(dataframe.lazy(), column_string.as_str()) {
+        Ok(df) => df,
+        Err(e) => match e {
+            PolarsError::ColumnNotFound(..) => {
+                // Return BadRequest if specified column doesn't exist
+                return Ok(plain_response(StatusCode::BadRequest, "Column not found"));
+            }
+            _ => {
+                // Return InternalServerError for other column-related errors
+                return Ok(plain_response(
+                    StatusCode::InternalServerError,
+                    format!("Column errror {:?}", e.to_string()).as_str(),
+                ));
+            }
+        },
+    };
+
+    Ok(dataframe_to_json_response(&mut dataframe))
 }
