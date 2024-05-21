@@ -187,7 +187,13 @@ async fn measurement(req: Request<()>) -> tide::Result {
     Ok(dataframe_to_json_response(&mut dataframe))
 }
 
+#[derive(Deserialize, Debug)]
+struct ParameterQuery {
+    columns: Option<String>,
+}
 async fn parameters(req: Request<()>) -> tide::Result {
+    let query: ParameterQuery = req.query()?;
+
     // Extract the filename parameter from the request path and format it with directory structure
     let filename: String = match req.param("name") {
         Ok(file) => format!("testdata/art/{}.art", file),
@@ -204,7 +210,7 @@ async fn parameters(req: Request<()>) -> tide::Result {
         }
     };
 
-    let column_string = String::default();
+    let column_string = query.columns.unwrap_or_default();
     let mut dataframe = match select_dataframe_columns(dataframe.lazy(), column_string.as_str()) {
         Ok(df) => df,
         Err(e) => match e {

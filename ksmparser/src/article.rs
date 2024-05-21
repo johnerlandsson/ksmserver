@@ -4,11 +4,12 @@
 ///
 /// Functions included handle reading from files, parsing content, and validating
 /// program names and key-value pair arrangements within the given article files.
-use super::ParseError;
+use super::{ParseError, parse_folder};
 use crate::read_and_decode_lines;
 use polars::prelude::*;
-use std::io;
+use std::collections::HashMap;
 use std::path::Path;
+use std::io;
 
 /// Parses article parameters from an iterator over lines of text, producing a DataFrame.
 ///
@@ -113,13 +114,17 @@ fn read_article_parameters(
 /// # Errors
 /// - `InvalidFile`: If the specified file could not be read or decoded.
 /// - Additionally includes all errors thrown by `read_article_parameters`.
-pub fn parse_art_file<P: AsRef<Path> + std::fmt::Display + Copy>(
+pub fn parse_art_file<P: AsRef<Path>>(
     file_path: P,
 ) -> Result<DataFrame, ParseError> {
-    match read_and_decode_lines(file_path) {
+    match read_and_decode_lines(&file_path) {
         // Attempt to read article parameters from the decoded lines
         Ok(lines) => read_article_parameters(lines),
         // Return an error if the file could not be read and decoded
-        Err(_) => Err(ParseError::InvalidFile(file_path.to_string())),
+        Err(_) => Err(ParseError::InvalidFile(file_path.as_ref().to_string_lossy().into_owned())),
     }
+}
+
+pub fn parse_art_folder<P: AsRef<Path>> (dir: P) -> Result<HashMap<String, DataFrame>, ParseError> {
+    parse_folder(dir, parse_art_file)
 }

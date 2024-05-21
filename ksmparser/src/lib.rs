@@ -1,19 +1,22 @@
 pub mod article;
 pub mod measurement;
 use encoding_rs::ISO_8859_10;
-use std::fmt;
-use std::fs::File;
-use std::io::{self, BufReader, BufRead};
-use std::path::Path;
 use encoding_rs_io::DecodeReaderBytesBuilder;
-
+use polars::prelude::DataFrame;
+use std::collections::HashMap;
+use std::fmt;
+use std::fs::{self, File};
+use std::io::{self, BufRead, BufReader};
+use std::path::Path;
 
 /// Reads lines from a given file and decodes them using the ISO_8859_10 encoding.
 ///
 /// The function opens a file specified by the `file_path` and decodes its content
 /// from ISO_8859_10 to UTF-8, returning an iterator over the resulting lines.
 /// Each line is wrapped in a `Result` to handle potential errors in reading or decoding.
-fn read_and_decode_lines<P: AsRef<Path>>(file_path: P) -> io::Result<impl Iterator<Item = io::Result<String>>> {
+fn read_and_decode_lines<P: AsRef<Path>>(
+    file_path: P,
+) -> io::Result<impl Iterator<Item = io::Result<String>>> {
     let file = File::open(file_path)?;
     let reader = BufReader::new(file);
 
@@ -22,6 +25,24 @@ fn read_and_decode_lines<P: AsRef<Path>>(file_path: P) -> io::Result<impl Iterat
         .encoding(Some(ISO_8859_10))
         .build(reader);
     Ok(BufReader::new(decoder).lines())
+}
+
+type ParseFunction<P> = fn(P) -> Result<DataFrame, ParseError>;
+fn parse_folder<P: AsRef<Path>>(
+    dir: P,
+    parse_function: ParseFunction<&Path>,
+) -> Result<HashMap<String, DataFrame>, ParseError> {
+    let mut map = HashMap::new();
+    for entry in fs::read_dir(dir).map_err(|_| ParseError::ReadFolderError)? {
+        let file = entry.map_err(|_| ParseError::ReadFolderError)?;
+        let path = file.path().clone();
+        let key = file.file_name().to_string_lossy().to_string();
+        if path.extension().unwrap_or_default() == "art" {
+            map.insert(key, parse_function(file.path().as_ref())?);
+        }
+    }
+
+    Ok(map)
 }
 
 // Define error types for parsing ksm data that can be displayed and formatted
@@ -52,6 +73,8 @@ pub enum ParseError {
     SeriesCreationError,
 
     DataAlignmentError,
+
+    ReadFolderError,
 }
 
 impl fmt::Display for ParseError {
@@ -80,6 +103,9 @@ impl fmt::Display for ParseError {
             }
             ParseError::DataAlignmentError => {
                 write!(f, "Failed to align or insert row")
+            }
+            ParseError::ReadFolderError => {
+                write!(f, "Error when interating entries in a folder")
             }
         }
     }
