@@ -1,4 +1,4 @@
-use super::ParseError;
+use super::{ParseError, parse_folder};
 use crate::read_and_decode_lines;
 use lazy_static::lazy_static;
 use polars::prelude::*;
@@ -286,15 +286,17 @@ fn read_measurement_entries(
 /// * `Result<DataFrame, ParseError>` where `DataFrame` contains the combined data from the file.
 /// * `ParseError::InvalidFile` if the file cannot be opened or read.
 /// * Errors inherited from `read_measurement_entries` function on parsing or DataFrame construction issues.
-pub fn parse_dat_file<P: AsRef<Path> + std::fmt::Display + Copy>(
+pub fn parse_dat_file<P: AsRef<Path>>(
     file_path: P,
 ) -> Result<DataFrame, ParseError> {
     match read_and_decode_lines(file_path) {
         Ok(iter) => {
             return read_measurement_entries(iter);
         }
-        Err(_) => {
-            return Err(ParseError::InvalidFile(file_path.to_string()));
-        }
+        Err(_) => Err(ParseError::InvalidFile(file_path.as_ref().to_string_lossy().into_owned())),
     }
+}
+
+pub fn parse_dat_folder<P: AsRef<Path>> (dir: P) -> Result<HashMap<String, DataFrame>, ParseError> {
+    parse_folder(dir, parse_dat_file, "art")
 }

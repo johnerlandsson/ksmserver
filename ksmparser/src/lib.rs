@@ -35,20 +35,16 @@ fn parse_folder<P: AsRef<Path>>(
     let mut map: HashMap<String, DataFrame> = HashMap::new();
     for entry in fs::read_dir(dir).map_err(|_| ParseError::ReadFolderError)? {
         let path = entry.map_err(|_| ParseError::ReadFolderError)?.path();
-        let file_name = path
-            .file_stem()
-            .and_then(|name| name.to_str())
-            .map(|name| name.to_owned())
-            .ok_or(ParseError::FilePathError)?;
-        let current_extension = path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .unwrap_or_default();
-        if current_extension == file_extension {
-            map.insert(
-                file_name,
-                parse_function(path)?,
-            );
+
+        if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
+            if extension == file_extension {
+                if let Some(file_name) = path.file_stem().and_then(|name| name.to_str()) {
+                    let data_frame = parse_function(path.clone())?;
+                    map.insert(file_name.to_owned(), data_frame);
+                } else {
+                    return Err(ParseError::FileNameExtractionError);
+                }
+            }
         }
     }
     Ok(map)
@@ -85,9 +81,7 @@ pub enum ParseError {
 
     ReadFolderError,
 
-    InvalidExtension,
-
-    FilePathError,
+    FileNameExtractionError,
 }
 
 impl fmt::Display for ParseError {
@@ -120,10 +114,7 @@ impl fmt::Display for ParseError {
             ParseError::ReadFolderError => {
                 write!(f, "Error when interating entries in a folder")
             }
-            ParseError::InvalidExtension => {
-                write!(f, "Invalid extension in filename")
-            }
-            ParseError::FilePathError => {
+            ParseError::FileNameExtractionError => {
                 write!(f, "Error when extracting file path")
             }
         }
