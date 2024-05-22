@@ -27,21 +27,25 @@ fn read_and_decode_lines<P: AsRef<Path>>(
     Ok(BufReader::new(decoder).lines())
 }
 
+//pub trait ParseFunction<P> {
+        //fn parse(&self, path: P) -> Result<DataFrame, ParseError>;
+//}
 type ParseFunction<P> = fn(P) -> Result<DataFrame, ParseError>;
 fn parse_folder<P: AsRef<Path>>(
     dir: P,
     parse_function: ParseFunction<&Path>,
 ) -> Result<HashMap<String, DataFrame>, ParseError> {
-    let mut map = HashMap::new();
+    let mut map = maplit::hashmap!();
     for entry in fs::read_dir(dir).map_err(|_| ParseError::ReadFolderError)? {
         let file = entry.map_err(|_| ParseError::ReadFolderError)?;
-        let path = file.path().clone();
-        let key = file.file_name().to_string_lossy().to_string();
+        let path = file.path().into_boxed_path();
         if path.extension().unwrap_or_default() == "art" {
-            map.insert(key, parse_function(file.path().as_ref())?);
-        }
-    }
-
+            map.insert(
+                file.file_name().to_string_lossy().into_owned(),
+                parse_function(path)?,
+            );
+        } 
+    } 
     Ok(map)
 }
 
