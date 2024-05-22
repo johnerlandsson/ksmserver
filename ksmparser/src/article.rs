@@ -126,5 +126,5 @@ pub fn parse_art_file<P: AsRef<Path>>(
 }
 
 pub fn parse_art_folder<P: AsRef<Path>> (dir: P) -> Result<HashMap<String, DataFrame>, ParseError> {
-    parse_folder(dir, parse_art_file)
+    parse_folder(dir, parse_art_file, "art")
 }
