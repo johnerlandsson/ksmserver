@@ -54,21 +54,15 @@ impl<'a> KSMData<'a> {
 
 #[async_std::main]
 async fn main() -> tide::Result<()> {
+    tide::log::start();
+
     log::info!("Startup: Reading article parameters");
     let art_data = KSMData::new("./testdata/art", "art", parse_art_file);
-    if art_data.load_data().await.is_err() {
+    if let Err(e) = art_data.load_data().await {
+        log::error!("{}", e);
+        return Ok(());
     }
-    match art_data.load_data().await {
-        Ok(_) => {
-            //dbg!(art_data.data);
-            dbg!("Hello");
-        },
-        Err(_) => {
-            return Ok(());
-        },
-    };
 
-    tide::log::start();
     let mut server = tide::new();
 
     server.at("/measurement/:name").get(measurement);
