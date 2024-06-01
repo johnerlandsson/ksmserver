@@ -6,11 +6,14 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-ksmparser = { path = "../ksmparser" }
-polars = {version = "0.39.2", features = ["lazy"]}
-polars-io = { version = "0.39.2", features = ["json"] }
-tide = "0.16.0"
 async-std = { version = "1.12.0", features = ["attributes"] }
 chrono = { version = "0.4.38", features = ["serde"] }
+dashmap = "5.5.3"
+#env_logger = "0.11.3"
+ksmparser = { path = "../ksmparser" }
+log = "0.4.21"
+polars = {version = "0.39.2", features = ["lazy"]}
+polars-io = { version = "0.39.2", features = ["json"] }
 serde = { version = "1.0.201", features = ["derive"] }
 serde_urlencoded = "0.7.1"
+tide = "0.16.0"

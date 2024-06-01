@@ -289,14 +289,12 @@ fn read_measurement_entries(
 pub fn parse_dat_file<P: AsRef<Path>>(
     file_path: P,
 ) -> Result<DataFrame, ParseError> {
-    match read_and_decode_lines(file_path) {
-        Ok(iter) => {
-            return read_measurement_entries(iter);
-        }
+    match read_and_decode_lines(&file_path) {
+        Ok(lines) => read_measurement_entries(lines),
         Err(_) => Err(ParseError::InvalidFile(file_path.as_ref().to_string_lossy().into_owned())),
     }
 }
 
 pub fn parse_dat_folder<P: AsRef<Path>> (dir: P) -> Result<HashMap<String, DataFrame>, ParseError> {
-    parse_folder(dir, parse_dat_file, "art")
+    parse_folder(dir, parse_dat_file, "dat")
 }

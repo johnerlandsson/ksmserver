@@ -1,15 +1,73 @@
 use chrono::NaiveDate;
+use dashmap::DashMap;
 use ksmparser::article::parse_art_file;
 use ksmparser::measurement::parse_dat_file;
+use ksmparser::ParseError;
 use polars::prelude::*;
 use polars_io::json::JsonWriter;
 use serde::Deserialize;
 use std::fmt;
 use std::io::Cursor;
-use tide::{Request, Response, StatusCode};
+use std::path::PathBuf;
+use tide::{Request, Response, StatusCode, log};
+use std::fs;
+
+struct KSMData<'a> {
+    data: DashMap<String, DataFrame>,
+    dir_path: &'a str,
+    file_extension: &'a str,
+    parse_function: fn(file_path: PathBuf) -> Result<DataFrame, ParseError>,
+}
+impl<'a> KSMData<'a> {
+    pub fn new(
+        dir_path: &'a str,
+        file_extension: &'a str,
+        parse_function: fn(file_path: PathBuf) -> Result<DataFrame, ParseError>,
+    ) -> Self {
+        KSMData {
+            data: DashMap::new(),
+            dir_path,
+            file_extension,
+            parse_function,
+        }
+    }
+
+    pub async fn load_data(&self) -> Result<(), ParseError> {
+        for entry in fs::read_dir(self.dir_path).map_err(|_| ParseError::ReadFolderError)? {
+            let path = entry.map_err(|_| ParseError::ReadFolderError)?.path();
+
+            if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
+                if extension == self.file_extension {
+                    if let Some(file_name) = path.file_stem().and_then(|name| name.to_str()) {
+                        let parse_function = self.parse_function;
+                        let data_frame = parse_function(path.clone())?;
+                        self.data.insert(file_name.to_owned(), data_frame);
+                    } else {
+                        return Err(ParseError::FileNameExtractionError);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+}
 
 #[async_std::main]
 async fn main() -> tide::Result<()> {
+    log::info!("Startup: Reading article parameters");
+    let art_data = KSMData::new("./testdata/art", "art", parse_art_file);
+    if art_data.load_data().await.is_err() {
+    }
+    match art_data.load_data().await {
+        Ok(_) => {
+            //dbg!(art_data.data);
+            dbg!("Hello");
+        },
+        Err(_) => {
+            return Ok(());
+        },
+    };
+
     tide::log::start();
     let mut server = tide::new();
 
