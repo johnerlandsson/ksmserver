@@ -7,13 +7,13 @@ use polars::prelude::*;
 use polars_io::json::JsonWriter;
 use serde::Deserialize;
 use std::fmt;
+use std::fs;
 use std::io::Cursor;
 use std::path::PathBuf;
-use tide::{Request, Response, StatusCode, log};
-use std::fs;
+use tide::{log, Request, Response, StatusCode};
 
 struct KSMData<'a> {
-    data: DashMap<String, DataFrame>,
+    data: Arc<DashMap<String, LazyFrame>>,
     dir_path: &'a str,
     file_extension: &'a str,
     parse_function: fn(file_path: PathBuf) -> Result<DataFrame, ParseError>,
@@ -25,7 +25,7 @@ impl<'a> KSMData<'a> {
         parse_function: fn(file_path: PathBuf) -> Result<DataFrame, ParseError>,
     ) -> Self {
         KSMData {
-            data: DashMap::new(),
+            data: Arc::new(DashMap::new()),
             dir_path,
             file_extension,
             parse_function,
@@ -41,7 +41,7 @@ impl<'a> KSMData<'a> {
                     if let Some(file_name) = path.file_stem().and_then(|name| name.to_str()) {
                         let parse_function = self.parse_function;
                         let data_frame = parse_function(path.clone())?;
-                        self.data.insert(file_name.to_owned(), data_frame);
+                        self.data.insert(file_name.to_owned(), data_frame.lazy());
                     } else {
                         return Err(ParseError::FileNameExtractionError);
                     }
@@ -52,18 +52,39 @@ impl<'a> KSMData<'a> {
     }
 }
 
+#[derive(Clone)]
+struct AppState {
+    measurement_data: Arc<DashMap<String, LazyFrame>>,
+    parameter_data: Arc<DashMap<String, LazyFrame>>,
+}
+
 #[async_std::main]
 async fn main() -> tide::Result<()> {
     tide::log::start();
 
+    // Initialize article parameters struct
     log::info!("Startup: Reading article parameters");
     let art_data = KSMData::new("./testdata/art", "art", parse_art_file);
     if let Err(e) = art_data.load_data().await {
-        log::error!("{}", e);
+        log::error!("Error when loading article parameters: {}", e);
         return Ok(());
     }
 
-    let mut server = tide::new();
+    // Initialize measurement data struct
+    log::info!("Startup: Reading measurement data");
+    let meas_data = KSMData::new("./testdata/dat2", "dat", parse_dat_file);
+    if let Err(e) = meas_data.load_data().await {
+        log::error!("Error when loading measurement data: {}", e);
+        return Ok(());
+    }
+
+    let state = AppState {
+        measurement_data: meas_data.data,
+        parameter_data: art_data.data,
+    };
+
+    //let mut server = tide::new();
+    let mut server = tide::with_state(state);
 
     server.at("/measurement/:name").get(measurement);
     server.at("/parameters/:name").get(parameters);
@@ -155,10 +176,10 @@ fn filter_dataframe_by_measure_time(
     Ok(dataframe.lazy().filter(start.and(end)))
 }
 
-fn select_dataframe_columns(dataframe: LazyFrame, columns: &str) -> Result<DataFrame, PolarsError> {
+fn select_dataframe_columns(lazyframe: LazyFrame, columns: &str) -> Result<DataFrame, PolarsError> {
     //Assume all columns if columns string is empty
     if columns.is_empty() {
-        return dataframe.collect();
+        return lazyframe.collect();
     }
 
     // Split the input string by commas and collect into a vector of column names
@@ -168,7 +189,7 @@ fn select_dataframe_columns(dataframe: LazyFrame, columns: &str) -> Result<DataF
     let column_expressions: Vec<Expr> = column_names.iter().map(|&name| col(name)).collect();
 
     // Use the column expressions to select specified columns from the LazyFrame and collect the result into a DataFrame
-    dataframe.select(column_expressions).collect()
+    lazyframe.select(column_expressions).collect()
 }
 
 // Defines a structure to parse query parameters from a request.
@@ -178,7 +199,7 @@ struct MeasurementQuery {
     end_date: Option<NaiveDate>,   // Optional end date for filtering dataframe
     columns: Option<String>,       // Optional comma-separated string of columns to select
 }
-async fn measurement(req: Request<()>) -> tide::Result {
+async fn measurement(req: Request<AppState>) -> tide::Result {
     // Deserialize the query parameters into the MeasurementQuery struct
     let query: MeasurementQuery = req.query()?;
 
@@ -243,42 +264,44 @@ async fn measurement(req: Request<()>) -> tide::Result {
 struct ParameterQuery {
     columns: Option<String>,
 }
-async fn parameters(req: Request<()>) -> tide::Result {
+async fn parameters(req: Request<AppState>) -> tide::Result {
     let query: ParameterQuery = req.query()?;
+    let data = &req.state().parameter_data;
 
-    // Extract the filename parameter from the request path and format it with directory structure
-    let filename: String = match req.param("name") {
-        Ok(file) => format!("testdata/art/{}.art", file),
+    let key = match req.param("name") {
+        Ok(file) => format!("{}.art", file),
         Err(_) => {
             // Return a BadRequest response if filename parameter is missing or incorrect
             return Ok(plain_response(StatusCode::BadRequest, "Invalid parameter"));
         }
     };
 
-    let dataframe = match parse_art_file(filename.as_str()) {
-        Ok(df) => df,
-        Err(_) => {
+    let lazyframe = match data.get(key.as_str()) {
+        Some(df) => df.clone(),
+        None => {
             return Ok(plain_response(StatusCode::InternalServerError, ""));
-        }
-    };
-
-    let column_string = query.columns.unwrap_or_default();
-    let mut dataframe = match select_dataframe_columns(dataframe.lazy(), column_string.as_str()) {
-        Ok(df) => df,
-        Err(e) => match e {
-            PolarsError::ColumnNotFound(..) => {
-                // Return BadRequest if specified column doesn't exist
-                return Ok(plain_response(StatusCode::BadRequest, "Column not found"));
-            }
-            _ => {
-                // Return InternalServerError for other column-related errors
-                return Ok(plain_response(
-                    StatusCode::InternalServerError,
-                    format!("Column errror {:?}", e.to_string()).as_str(),
-                ));
-            }
         },
     };
+
+
+    let column_string = query.columns.unwrap_or_default();
+    let mut dataframe =
+        match select_dataframe_columns(lazyframe, &column_string) {
+            Ok(df) => df,
+            Err(e) => match e {
+                PolarsError::ColumnNotFound(..) => {
+                    // Return BadRequest if specified column doesn't exist
+                    return Ok(plain_response(StatusCode::BadRequest, "Column not found"));
+                }
+                _ => {
+                    // Return InternalServerError for other column-related errors
+                    return Ok(plain_response(
+                        StatusCode::InternalServerError,
+                        format!("Column errror {:?}", e.to_string()).as_str(),
+                    ));
+                }
+            },
+        };
 
     Ok(dataframe_to_json_response(&mut dataframe))
 }

@@ -9,9 +9,7 @@ edition = "2021"
 async-std = { version = "1.12.0", features = ["attributes"] }
 chrono = { version = "0.4.38", features = ["serde"] }
 dashmap = "5.5.3"
-#env_logger = "0.11.3"
 ksmparser = { path = "../ksmparser" }
-log = "0.4.21"
 polars = {version = "0.39.2", features = ["lazy"]}
 polars-io = { version = "0.39.2", features = ["json"] }
 serde = { version = "1.0.201", features = ["derive"] }
