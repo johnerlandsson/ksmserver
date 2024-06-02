@@ -269,19 +269,22 @@ async fn parameters(req: Request<AppState>) -> tide::Result {
     let data = &req.state().parameter_data;
 
     let key = match req.param("name") {
-        Ok(file) => format!("{}.art", file),
+        Ok(file) => file, //format!("{}.art", file),
         Err(_) => {
             // Return a BadRequest response if filename parameter is missing or incorrect
             return Ok(plain_response(StatusCode::BadRequest, "Invalid parameter"));
         }
     };
 
-    let lazyframe = match data.get(key.as_str()) {
+    log::info!("Before");
+    let lazyframe = match data.get(key) {
         Some(df) => df.clone(),
         None => {
+            log::info!("None");
             return Ok(plain_response(StatusCode::InternalServerError, ""));
         },
     };
+    log::info!("After");
 
 
     let column_string = query.columns.unwrap_or_default();
