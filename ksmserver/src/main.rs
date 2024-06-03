@@ -12,26 +12,29 @@ use std::io::Cursor;
 use std::path::PathBuf;
 use tide::{log, Request, Response, StatusCode};
 
+/// Represents a structure that holds and manages data frames loaded from files in the KSM system.
 struct KSMData<'a> {
-    data: Arc<DashMap<String, LazyFrame>>,
-    dir_path: &'a str,
+    data: Arc<DashMap<String, LazyFrame>>, 
+    dir_path: &'a str, 
     file_extension: &'a str,
     parse_function: fn(file_path: PathBuf) -> Result<DataFrame, ParseError>,
 }
 impl<'a> KSMData<'a> {
+    /// Creates a new instance of KSMData.
     pub fn new(
         dir_path: &'a str,
         file_extension: &'a str,
         parse_function: fn(file_path: PathBuf) -> Result<DataFrame, ParseError>,
     ) -> Self {
         KSMData {
-            data: Arc::new(DashMap::new()),
+            data: Arc::new(DashMap::new()),  // Initializes an empty concurrent map.
             dir_path,
             file_extension,
             parse_function,
         }
     }
 
+    /// Loads data frames from files in the specified directory and stores them in the concurrent map.
     pub async fn load_data(&self) -> Result<(), ParseError> {
         for entry in fs::read_dir(self.dir_path).map_err(|_| ParseError::ReadFolderError)? {
             let path = entry.map_err(|_| ParseError::ReadFolderError)?.path();
