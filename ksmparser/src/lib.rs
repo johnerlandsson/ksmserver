@@ -82,6 +82,10 @@ pub enum ParseError {
     ReadFolderError,
 
     FileNameExtractionError,
+
+    TypeConversionError(String, String, String),
+
+    ColumnMismatchError,
 }
 
 impl fmt::Display for ParseError {
@@ -116,6 +120,12 @@ impl fmt::Display for ParseError {
             }
             ParseError::FileNameExtractionError => {
                 write!(f, "Error when extracting file path")
+            }
+            ParseError::TypeConversionError(column, value, dtype) => {
+                write!(f, "Error when converting column {} to {}: {}", column, dtype, value)
+            }
+            ParseError::ColumnMismatchError => {
+                write!(f, "Column mismatch")
             }
         }
     }

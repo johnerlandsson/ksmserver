@@ -27,7 +27,7 @@ impl<'a> KSMData<'a> {
         parse_function: fn(file_path: PathBuf) -> Result<DataFrame, ParseError>,
     ) -> Self {
         KSMData {
-            data: Arc::new(DashMap::new()),  // Initializes an empty concurrent map.
+            data: Arc::new(DashMap::new()),  
             dir_path,
             file_extension,
             parse_function,
@@ -55,6 +55,7 @@ impl<'a> KSMData<'a> {
     }
 }
 
+/// Represents the state of the server application, holding shared resources.
 #[derive(Clone)]
 struct AppState {
     measurement_data: Arc<DashMap<String, LazyFrame>>,
@@ -75,7 +76,7 @@ async fn main() -> tide::Result<()> {
 
     // Initialize measurement data struct
     log::info!("Startup: Reading measurement data");
-    let meas_data = KSMData::new("./testdata/dat2", "dat", parse_dat_file);
+    let meas_data = KSMData::new("./testdata/dat", "dat", parse_dat_file);
     if let Err(e) = meas_data.load_data().await {
         log::error!("Error when loading measurement data: {}", e);
         return Ok(());

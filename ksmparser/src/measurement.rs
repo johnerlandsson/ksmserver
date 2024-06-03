@@ -106,14 +106,12 @@ fn align_and_insert_row(
 fn create_dataframe_from_columns_and_values(
     columns: &str,
     values: &str,
-) -> PolarsResult<DataFrame> { 
+) -> Result<DataFrame, ParseError> { 
     let columns_vec: Vec<&str> = columns.split("\t").collect();
     let values_vec: Vec<&str> = values.split("\t").collect();
 
     if columns_vec.len() != values_vec.len() {
-        return Err(PolarsError::ShapeMismatch(
-            format!("Columns mismatch").into(),
-        ));
+        return Err(ParseError::ColumnMismatchError);
     }
 
     let mut series_vec = Vec::new();
@@ -128,8 +126,10 @@ fn create_dataframe_from_columns_and_values(
         series_vec.push(series);
     }
 
-    DataFrame::new(series_vec)
-        .map_err(|e| PolarsError::ShapeMismatch(format!("Error creating dataframe {}", e).into()))
+    match DataFrame::new(series_vec) {
+        Ok(df) => Ok(df),
+        Err(_) => Err(ParseError::DataFrameCreationError),
+    }
 }
 
 
@@ -148,41 +148,33 @@ fn create_dataframe_from_columns_and_values(
 /// A `Result` that is either:
 /// - `Ok(Series)` - A new Series with the parsed value if successful.
 /// - `Err(PolarsError)` - An error if the parsing fails.
-fn parse_series(column: &str, value: &str, data_type: &DataType) -> PolarsResult<Series> { 
+fn parse_series(column: &str, value: &str, data_type: &DataType) -> Result<Series, ParseError> { 
     match data_type {
         // If data type is Float64, attempt to parse the string `value` into a f64.
         DataType::Float64 => {
-            let parsed_value = value.parse::<f64>().map_err(|e| {
-                PolarsError::InvalidOperation(
-                    format!("Error parsing float in {}: {:?}", column, e).into(),
-                )
+            let parsed_value = value.parse::<f64>().map_err(|_| {
+                ParseError::TypeConversionError(column.into(), value.into(), "Float".into())
             })?;
             Ok(Series::new(column, &[parsed_value]))
         }
         // Similar parsing process for Float32.
         DataType::Float32 => {
-            let parsed_value = value.parse::<f32>().map_err(|e| {
-                PolarsError::InvalidOperation(
-                    format!("Error parsing float in {}: {:?}", column, e).into(),
-                )
+            let parsed_value = value.parse::<f32>().map_err(|_| {
+                ParseError::TypeConversionError(column.into(), value.into(), "Int".into())
             })?;
             Ok(Series::new(column, &[parsed_value]))
         }
         // Similar parsing process for Int32.
         DataType::Int32 => {
-            let parsed_value = value.parse::<i32>().map_err(|e| {
-                PolarsError::InvalidOperation(
-                    format!("Error parsing int in {}: {:?}", column, e).into(),
-                )
+            let parsed_value = value.parse::<i32>().map_err(|_| {
+                ParseError::TypeConversionError(column.into(), value.into(), "Int".into())
             })?;
             Ok(Series::new(column, &[parsed_value]))
         }
         // Similar parsing process for Int64.
         DataType::Int64 => {
-            let parsed_value = value.parse::<i64>().map_err(|e| {
-                PolarsError::InvalidOperation(
-                    format!("Error parsing int in {}: {:?}", column, e).into(),
-                )
+            let parsed_value = value.parse::<i64>().map_err(|_| {
+                ParseError::TypeConversionError(column.into(), value.into(), "Int".into())
             })?;
             Ok(Series::new(column, &[parsed_value]))
         }
@@ -258,7 +250,12 @@ fn read_measurement_entries(
         //Split the column and value stings and create a dataframe with a single row
         let mut new_row = match create_dataframe_from_columns_and_values(&column_row, &values_row) {
             Ok(df) => df,
-            Err(e) => return Err(ParseError::MalformedEntry(format!("{:?}", e))),
+            Err(e) => {
+                match e {
+                    //PolarsError::InvalidOperation => 
+                    _ => return Err(ParseError::MalformedEntry(format!("{:?}", e))),
+                }
+            },
         };
 
         match align_dataframes_and_insert_row(&mut dataframe, &mut new_row) {
