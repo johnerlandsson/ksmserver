@@ -122,7 +122,7 @@ fn create_dataframe_from_columns_and_values(
             None => &DataType::String,
         };
 
-        let series = parse_series(column, value, data_type)?;
+        let series = parse_series(column, value, data_type);
         series_vec.push(series);
     }
 
@@ -141,7 +141,6 @@ fn create_dataframe_from_columns_and_values(
 ///
 /// This function reads a string value and tries to parse and convert it into a Series
 /// of a specific DataType. It covers parsing for common numerical types and dates.
-/// Parsing failures due to invalid format or incompatible types result in a `PolarsError`.
 ///
 /// # Arguments
 /// * `column` - A string slice that holds the name of the column to which the value belongs.
@@ -152,36 +151,36 @@ fn create_dataframe_from_columns_and_values(
 /// A `Result` that is either:
 /// - `Ok(Series)` - A new Series with the parsed value if successful.
 /// - `Err(PolarsError)` - An error if the parsing fails.
-fn parse_series(column: &str, value: &str, data_type: &DataType) -> Result<Series, ParseError> {
+fn parse_series(column: &str, value: &str, data_type: &DataType) -> Series {
     match data_type {
         DataType::Float64 => {
             match value.parse::<f64>() {
-                Ok(parsed_value) => Ok(Series::new(column, &[parsed_value])),
-                Err(_) => Ok(Series::full_null(column, 1, data_type)),
+                Ok(parsed_value) => Series::new(column, &[parsed_value]),
+                Err(_) => Series::full_null(column, 1, data_type),
             }
         },
         // Similar parsing process for Float32.
         DataType::Float32 => {
             match value.parse::<f32>() {
-                Ok(parsed_value) => Ok(Series::new(column, &[parsed_value])),
-                Err(_) => Ok(Series::full_null(column, 1, data_type)),
+                Ok(parsed_value) => Series::new(column, &[parsed_value]),
+                Err(_) => Series::full_null(column, 1, data_type),
             }
         },
         // Similar parsing process for Int64.
         DataType::Int64 => {
             match value.parse::<i64>() {
-                Ok(parsed_value) => Ok(Series::new(column, &[parsed_value])),
-                Err(_) => Ok(Series::full_null(column, 1, data_type)),
+                Ok(parsed_value) => Series::new(column, &[parsed_value]),
+                Err(_) => Series::full_null(column, 1, data_type),
             }
         },
         // Similar parsing process for Int32.
         DataType::Int32 => {
             match value.parse::<i32>() {
-                Ok(parsed_value) => Ok(Series::new(column, &[parsed_value])),
-                Err(_) => Ok(Series::full_null(column, 1, data_type)),
+                Ok(parsed_value) => Series::new(column, &[parsed_value]),
+                Err(_) => Series::full_null(column, 1, data_type),
             }
         },
-        _ => Ok(Series::new(column, &[value])),
+        _ => Series::new(column, &[value]),
     }
 }
 
