@@ -162,27 +162,24 @@ fn parse_series(column: &str, value: &str, data_type: &DataType) -> Result<Serie
         },
         // Similar parsing process for Float32.
         DataType::Float32 => {
-            let parsed_value = match value.parse::<f32>() {
-                Ok(pv) => pv,
-                Err(_) => f32::default(),
-            };
-            Ok(Series::new(column, &[parsed_value]))
+            match value.parse::<f32>() {
+                Ok(parsed_value) => Ok(Series::new(column, &[parsed_value])),
+                Err(_) => Ok(Series::full_null(column, 1, data_type)),
+            }
         },
         // Similar parsing process for Int64.
         DataType::Int64 => {
-            let parsed_value = match value.parse::<i64>() {
-                Ok(pv) => pv,
-                Err(_) => i64::default(),
-            };
-            Ok(Series::new(column, &[parsed_value]))
+            match value.parse::<i64>() {
+                Ok(parsed_value) => Ok(Series::new(column, &[parsed_value])),
+                Err(_) => Ok(Series::full_null(column, 1, data_type)),
+            }
         },
         // Similar parsing process for Int32.
         DataType::Int32 => {
-            let parsed_value = match value.parse::<i32>() {
-                Ok(pv) => pv,
-                Err(_) => i32::default(),
-            };
-            Ok(Series::new(column, &[parsed_value]))
+            match value.parse::<i32>() {
+                Ok(parsed_value) => Ok(Series::new(column, &[parsed_value])),
+                Err(_) => Ok(Series::full_null(column, 1, data_type)),
+            }
         },
         _ => Ok(Series::new(column, &[value])),
     }
