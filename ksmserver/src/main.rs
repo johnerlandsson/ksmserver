@@ -146,7 +146,7 @@ impl fmt::Display for KSMError {
 }
 
 fn filter_dataframe_by_measure_time(
-    dataframe: DataFrame,
+    lazyframe: LazyFrame,
     start_date: NaiveDate,
     end_date: NaiveDate,
 ) -> Result<LazyFrame, KSMError> {
@@ -173,7 +173,7 @@ fn filter_dataframe_by_measure_time(
     let end = col("measure_time1970").lt_eq(end);
 
     // Apply filter and lazily load results
-    Ok(dataframe.lazy().filter(start.and(end)))
+    Ok(lazyframe.filter(start.and(end)))
 }
 
 fn select_dataframe_columns(lazyframe: LazyFrame, columns: &str) -> Result<DataFrame, PolarsError> {
@@ -202,28 +202,32 @@ struct MeasurementQuery {
 async fn measurement(req: Request<AppState>) -> tide::Result {
     // Deserialize the query parameters into the MeasurementQuery struct
     let query: MeasurementQuery = req.query()?;
+    let data = &req.state().measurement_data;
 
-    // Extract the filename parameter from the request path and format it with directory structure
-    let filename: String = match req.param("name") {
-        Ok(file) => format!("testdata/dat/{}.dat", file),
+    let key = match req.param("name") {
+        Ok(file) => file,
         Err(_) => {
+            log::error!("Invalid key for measurement request");
             // Return a BadRequest response if filename parameter is missing or incorrect
-            return Ok(plain_response(StatusCode::BadRequest, "Invalid parameter"));
+            return Ok(plain_response(StatusCode::BadRequest, "Invalid key"));
         }
     };
 
-    // Attempt to parse the .dat file based on the given filename
-    let dataframe = match parse_dat_file(filename.as_str()) {
-        Ok(df) => df,
-        Err(e) => {
-            let body = format!("Error message: {e}.\nFile path: {filename}");
-            return Ok(plain_response(StatusCode::NotFound, body.as_str()));
+    let lazyframe = match data.get(key) {
+        Some(df) => df.clone(),
+        None => {
+            log::error!("Invalid parameter entry requested: {}", key);
+            let response_string = format!("Parameter entry not found: {}", key);
+            return Ok(plain_response(
+                StatusCode::InternalServerError,
+                response_string.as_str(),
+            ));
         }
     };
 
     // Filter the dataframe by measure time using provided start and end dates
-    let dataframe = match filter_dataframe_by_measure_time(
-        dataframe,
+    let lazyframe = match filter_dataframe_by_measure_time(
+        lazyframe,
         query.start_date.unwrap_or(NaiveDate::MIN),
         query.end_date.unwrap_or(NaiveDate::MAX),
     ) {
@@ -239,7 +243,7 @@ async fn measurement(req: Request<AppState>) -> tide::Result {
 
     // Process the optional column filtering
     let column_string = query.columns.unwrap_or_default();
-    let mut dataframe = match select_dataframe_columns(dataframe, column_string.as_str()) {
+    let mut dataframe = match select_dataframe_columns(lazyframe, column_string.as_str()) {
         Ok(df) => df,
         Err(e) => match e {
             PolarsError::ColumnNotFound(..) => {
@@ -271,40 +275,50 @@ async fn parameters(req: Request<AppState>) -> tide::Result {
     let key = match req.param("name") {
         Ok(file) => file, //format!("{}.art", file),
         Err(_) => {
+            log::error!("Invalid key for parameters request");
             // Return a BadRequest response if filename parameter is missing or incorrect
             return Ok(plain_response(StatusCode::BadRequest, "Invalid parameter"));
         }
     };
 
-    log::info!("Before");
     let lazyframe = match data.get(key) {
         Some(df) => df.clone(),
         None => {
-            log::info!("None");
-            return Ok(plain_response(StatusCode::InternalServerError, ""));
-        },
+            log::error!("Invalid parameter entry requested: {}", key);
+            let response_string = format!("Parameter entry not found: {}", key);
+            return Ok(plain_response(
+                StatusCode::InternalServerError,
+                response_string.as_str(),
+            ));
+        }
     };
-    log::info!("After");
-
 
     let column_string = query.columns.unwrap_or_default();
-    let mut dataframe =
-        match select_dataframe_columns(lazyframe, &column_string) {
-            Ok(df) => df,
-            Err(e) => match e {
-                PolarsError::ColumnNotFound(..) => {
-                    // Return BadRequest if specified column doesn't exist
-                    return Ok(plain_response(StatusCode::BadRequest, "Column not found"));
-                }
-                _ => {
-                    // Return InternalServerError for other column-related errors
-                    return Ok(plain_response(
-                        StatusCode::InternalServerError,
-                        format!("Column errror {:?}", e.to_string()).as_str(),
-                    ));
-                }
-            },
-        };
+    let mut dataframe = match select_dataframe_columns(lazyframe, &column_string) {
+        Ok(df) => df,
+        Err(e) => match e {
+            PolarsError::ColumnNotFound(..) => {
+                log::error!(
+                    "Parameters request with invalid column names: {}",
+                    column_string
+                );
+                // Return BadRequest if specified column doesn't exist
+                return Ok(plain_response(StatusCode::BadRequest, "Column not found"));
+            }
+            _ => {
+                log::error!(
+                    "Error when selecting parameters column. Column string: {}. Error: {}",
+                    column_string,
+                    e.to_string()
+                );
+                // Return InternalServerError for other column-related errors
+                return Ok(plain_response(
+                    StatusCode::InternalServerError,
+                    format!("Column errror {:?}", e.to_string()).as_str(),
+                ));
+            }
+        },
+    };
 
     Ok(dataframe_to_json_response(&mut dataframe))
 }
