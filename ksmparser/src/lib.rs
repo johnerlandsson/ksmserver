@@ -86,6 +86,8 @@ pub enum ParseError {
     TypeConversionError(String, String, String),
 
     ColumnMismatchError,
+
+    DuplicateColumns,
 }
 
 impl fmt::Display for ParseError {
@@ -126,6 +128,9 @@ impl fmt::Display for ParseError {
             }
             ParseError::ColumnMismatchError => {
                 write!(f, "Column mismatch")
+            }
+            ParseError::DuplicateColumns => {
+                write!(f, "Duplicate columns")
             }
         }
     }

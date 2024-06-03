@@ -1,4 +1,4 @@
-use super::{ParseError, parse_folder};
+use super::{parse_folder, ParseError};
 use crate::read_and_decode_lines;
 use lazy_static::lazy_static;
 use polars::prelude::*;
@@ -106,7 +106,7 @@ fn align_and_insert_row(
 fn create_dataframe_from_columns_and_values(
     columns: &str,
     values: &str,
-) -> Result<DataFrame, ParseError> { 
+) -> Result<DataFrame, ParseError> {
     let columns_vec: Vec<&str> = columns.split("\t").collect();
     let values_vec: Vec<&str> = values.split("\t").collect();
 
@@ -128,10 +128,14 @@ fn create_dataframe_from_columns_and_values(
 
     match DataFrame::new(series_vec) {
         Ok(df) => Ok(df),
-        Err(_) => Err(ParseError::DataFrameCreationError),
+        Err(e) => {
+            match e {
+                PolarsError::Duplicate(_) => Err(ParseError::DuplicateColumns),
+                _ => Err(ParseError::DataFrameCreationError),
+            }
+        }
     }
 }
-
 
 /// Parses a string value into a Series of specified data type.
 ///
@@ -148,37 +152,38 @@ fn create_dataframe_from_columns_and_values(
 /// A `Result` that is either:
 /// - `Ok(Series)` - A new Series with the parsed value if successful.
 /// - `Err(PolarsError)` - An error if the parsing fails.
-fn parse_series(column: &str, value: &str, data_type: &DataType) -> Result<Series, ParseError> { 
+fn parse_series(column: &str, value: &str, data_type: &DataType) -> Result<Series, ParseError> {
     match data_type {
-        // If data type is Float64, attempt to parse the string `value` into a f64.
         DataType::Float64 => {
-            let parsed_value = value.parse::<f64>().map_err(|_| {
-                ParseError::TypeConversionError(column.into(), value.into(), "Float".into())
-            })?;
-            Ok(Series::new(column, &[parsed_value]))
-        }
+            match value.parse::<f64>() {
+                Ok(parsed_value) => Ok(Series::new(column, &[parsed_value])),
+                Err(_) => Ok(Series::full_null(column, 1, data_type)),
+            }
+        },
         // Similar parsing process for Float32.
         DataType::Float32 => {
-            let parsed_value = value.parse::<f32>().map_err(|_| {
-                ParseError::TypeConversionError(column.into(), value.into(), "Int".into())
-            })?;
+            let parsed_value = match value.parse::<f32>() {
+                Ok(pv) => pv,
+                Err(_) => f32::default(),
+            };
             Ok(Series::new(column, &[parsed_value]))
-        }
-        // Similar parsing process for Int32.
-        DataType::Int32 => {
-            let parsed_value = value.parse::<i32>().map_err(|_| {
-                ParseError::TypeConversionError(column.into(), value.into(), "Int".into())
-            })?;
-            Ok(Series::new(column, &[parsed_value]))
-        }
+        },
         // Similar parsing process for Int64.
         DataType::Int64 => {
-            let parsed_value = value.parse::<i64>().map_err(|_| {
-                ParseError::TypeConversionError(column.into(), value.into(), "Int".into())
-            })?;
+            let parsed_value = match value.parse::<i64>() {
+                Ok(pv) => pv,
+                Err(_) => i64::default(),
+            };
             Ok(Series::new(column, &[parsed_value]))
-        }
-        // For any other data type, create a Series directly from the `value`.
+        },
+        // Similar parsing process for Int32.
+        DataType::Int32 => {
+            let parsed_value = match value.parse::<i32>() {
+                Ok(pv) => pv,
+                Err(_) => i32::default(),
+            };
+            Ok(Series::new(column, &[parsed_value]))
+        },
         _ => Ok(Series::new(column, &[value])),
     }
 }
@@ -252,10 +257,11 @@ fn read_measurement_entries(
             Ok(df) => df,
             Err(e) => {
                 match e {
-                    //PolarsError::InvalidOperation => 
-                    _ => return Err(ParseError::MalformedEntry(format!("{:?}", e))),
+                    //Ignore entries with duplicate column names
+                    ParseError::DuplicateColumns => continue, 
+                    _ => return Err(e),
                 }
-            },
+            }
         };
 
         match align_dataframes_and_insert_row(&mut dataframe, &mut new_row) {
@@ -283,15 +289,15 @@ fn read_measurement_entries(
 /// * `Result<DataFrame, ParseError>` where `DataFrame` contains the combined data from the file.
 /// * `ParseError::InvalidFile` if the file cannot be opened or read.
 /// * Errors inherited from `read_measurement_entries` function on parsing or DataFrame construction issues.
-pub fn parse_dat_file<P: AsRef<Path>>(
-    file_path: P,
-) -> Result<DataFrame, ParseError> {
+pub fn parse_dat_file<P: AsRef<Path>>(file_path: P) -> Result<DataFrame, ParseError> {
     match read_and_decode_lines(&file_path) {
         Ok(lines) => read_measurement_entries(lines),
-        Err(_) => Err(ParseError::InvalidFile(file_path.as_ref().to_string_lossy().into_owned())),
+        Err(_) => Err(ParseError::InvalidFile(
+            file_path.as_ref().to_string_lossy().into_owned(),
+        )),
     }
 }
 
-pub fn parse_dat_folder<P: AsRef<Path>> (dir: P) -> Result<HashMap<String, DataFrame>, ParseError> {
+pub fn parse_dat_folder<P: AsRef<Path>>(dir: P) -> Result<HashMap<String, DataFrame>, ParseError> {
     parse_folder(dir, parse_dat_file, "dat")
 }
