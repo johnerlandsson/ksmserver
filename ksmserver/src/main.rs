@@ -11,10 +11,11 @@ use std::fs;
 use std::io::Cursor;
 use std::path::PathBuf;
 use tide::{log, Request, Response, StatusCode};
+use async_std::task;
 
 /// Represents a structure that holds and manages data frames loaded from files in the KSM system.
 struct KSMData<'a> {
-    data: Arc<DashMap<String, LazyFrame>>, 
+    data: DashMap<String, LazyFrame>, 
     dir_path: &'a str, 
     file_extension: &'a str,
     parse_function: fn(file_path: PathBuf) -> Result<DataFrame, ParseError>,
@@ -27,7 +28,7 @@ impl<'a> KSMData<'a> {
         parse_function: fn(file_path: PathBuf) -> Result<DataFrame, ParseError>,
     ) -> Self {
         KSMData {
-            data: Arc::new(DashMap::new()),  
+            data: DashMap::new(),  
             dir_path,
             file_extension,
             parse_function,
@@ -39,8 +40,7 @@ impl<'a> KSMData<'a> {
         for entry in fs::read_dir(self.dir_path).map_err(|_| ParseError::ReadFolderError)? {
             let path = entry.map_err(|_| ParseError::ReadFolderError)?.path();
 
-            if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
-                if extension == self.file_extension {
+            if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) { if extension == self.file_extension {
                     if let Some(file_name) = path.file_stem().and_then(|name| name.to_str()) {
                         let parse_function = self.parse_function;
                         let data_frame = parse_function(path.clone())?;
@@ -57,9 +57,9 @@ impl<'a> KSMData<'a> {
 
 /// Represents the state of the server application, holding shared resources.
 #[derive(Clone)]
-struct AppState {
-    measurement_data: Arc<DashMap<String, LazyFrame>>,
-    parameter_data: Arc<DashMap<String, LazyFrame>>,
+struct AppState<'a> {
+    measurement_data: Arc<KSMData<'a>>,
+    parameter_data: Arc<KSMData<'a>>,
 }
 
 #[async_std::main]
@@ -68,7 +68,7 @@ async fn main() -> tide::Result<()> {
 
     // Initialize article parameters struct
     log::info!("Startup: Reading article parameters");
-    let art_data = KSMData::new("./testdata/art", "art", parse_art_file);
+    let art_data = Arc::new(KSMData::new("./testdata/art", "art", parse_art_file));
     if let Err(e) = art_data.load_data().await {
         log::error!("Error when loading article parameters: {}", e);
         return Ok(());
@@ -76,18 +76,17 @@ async fn main() -> tide::Result<()> {
 
     // Initialize measurement data struct
     log::info!("Startup: Reading measurement data");
-    let meas_data = KSMData::new("./testdata/dat", "dat", parse_dat_file);
+    let meas_data = Arc::new(KSMData::new("./testdata/dat", "dat", parse_dat_file));
     if let Err(e) = meas_data.load_data().await {
         log::error!("Error when loading measurement data: {}", e);
         return Ok(());
     }
 
     let state = AppState {
-        measurement_data: meas_data.data,
-        parameter_data: art_data.data,
+        measurement_data: meas_data,
+        parameter_data: art_data,
     };
 
-    //let mut server = tide::new();
     let mut server = tide::with_state(state);
 
     server.at("/measurement/:name").get(measurement);
@@ -203,7 +202,7 @@ struct MeasurementQuery {
     end_date: Option<NaiveDate>,   // Optional end date for filtering dataframe
     columns: Option<String>,       // Optional comma-separated string of columns to select
 }
-async fn measurement(req: Request<AppState>) -> tide::Result {
+async fn measurement(req: Request<AppState<'_>>) -> tide::Result {
     // Deserialize the query parameters into the MeasurementQuery struct
     let query: MeasurementQuery = req.query()?;
     let data = &req.state().measurement_data;
@@ -217,7 +216,7 @@ async fn measurement(req: Request<AppState>) -> tide::Result {
         }
     };
 
-    let lazyframe = match data.get(key) {
+    let lazyframe = match data.data.get(key) {
         Some(df) => df.clone(),
         None => {
             log::error!("Invalid parameter entry requested: {}", key);
@@ -272,7 +271,7 @@ async fn measurement(req: Request<AppState>) -> tide::Result {
 struct ParameterQuery {
     columns: Option<String>,
 }
-async fn parameters(req: Request<AppState>) -> tide::Result {
+async fn parameters(req: Request<AppState<'_>>) -> tide::Result {
     let query: ParameterQuery = req.query()?;
     let data = &req.state().parameter_data;
 
@@ -285,7 +284,7 @@ async fn parameters(req: Request<AppState>) -> tide::Result {
         }
     };
 
-    let lazyframe = match data.get(key) {
+    let lazyframe = match data.data.get(key) {
         Some(df) => df.clone(),
         None => {
             log::error!("Invalid parameter entry requested: {}", key);
@@ -326,3 +325,4 @@ async fn parameters(req: Request<AppState>) -> tide::Result {
 
     Ok(dataframe_to_json_response(&mut dataframe))
 }
+
