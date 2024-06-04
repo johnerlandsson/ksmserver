@@ -1,8 +1,8 @@
 use chrono::NaiveDate;
 use dashmap::DashMap;
+use ksmparser::ParseError;
 use ksmparser::article::parse_art_file;
 use ksmparser::measurement::parse_dat_file;
-use ksmparser::ParseError;
 use polars::prelude::*;
 use polars_io::json::JsonWriter;
 use serde::Deserialize;
@@ -11,7 +11,7 @@ use std::fs;
 use std::io::Cursor;
 use std::path::PathBuf;
 use tide::{log, Request, Response, StatusCode};
-use async_std::task;
+//use async_std::task;
 
 /// Represents a structure that holds and manages data frames loaded from files in the KSM system.
 struct KSMData<'a> {
@@ -74,6 +74,7 @@ async fn main() -> tide::Result<()> {
         return Ok(());
     }
 
+
     // Initialize measurement data struct
     log::info!("Startup: Reading measurement data");
     let meas_data = Arc::new(KSMData::new("./testdata/dat", "dat", parse_dat_file));
@@ -83,8 +84,8 @@ async fn main() -> tide::Result<()> {
     }
 
     let state = AppState {
-        measurement_data: meas_data,
-        parameter_data: art_data,
+        measurement_data: meas_data.clone(),
+        parameter_data: art_data.clone(),
     };
 
     let mut server = tide::with_state(state);
