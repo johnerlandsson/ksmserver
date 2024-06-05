@@ -1,9 +1,9 @@
 use async_std::task;
 use chrono::NaiveDate;
 use dashmap::DashMap;
+use ksmparser::ParseError;
 use ksmparser::article::parse_art_file;
 use ksmparser::measurement::parse_dat_file;
-use ksmparser::ParseError;
 use polars::prelude::*;
 use polars_io::json::JsonWriter;
 use serde::Deserialize;
@@ -13,6 +13,7 @@ use std::fs;
 use std::io::Cursor;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time;
 use tide::{log, Request, Response, StatusCode};
 
 /// Represents a structure that holds and manages data frames loaded from files in the KSM system.
@@ -65,6 +66,7 @@ async fn sync_task<'a>(
 ) {
     while !stop.load(Ordering::Relaxed) {
         log::info!("Sync task");
+        task::sleep(time::Duration::from_secs(2)).await;
     }
 }
 
