@@ -16,11 +16,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{self, SystemTime};
 use tide::{log, Request, Response, StatusCode};
 
+/// Represents a structure for storing the contents of a KSMFile and its modification time
 struct KSMFile {
     lazyframe: LazyFrame,
     modified: SystemTime,
 }
-/// Represents a structure that holds and manages data frames loaded from files in the KSM system.
+/// Represents a structure that holds and manages lazy-loaded data frames loaded from files in the KSM system.
 struct KSMData<'a> {
     data: DashMap<String, KSMFile>,
     dir_path: &'a str,
@@ -43,8 +44,19 @@ impl<'a> KSMData<'a> {
     }
 
     /// Loads data frames from files in the specified directory and stores them in the concurrent map.
-    pub async fn sync_data(&self) -> Result<(), ParseError> {
+    /// 
+    /// This function reads the directory specified by `dir_path`, checks each file for the specified `file_extension`,
+    /// and parses the file if it is modified more recently than the stored version. The parsed data frame is stored
+    /// in a concurrent map with the file name as the key.
+    /// 
+    /// # Returns
+    /// A `Result` which is `Ok(())` if all files are processed successfully, or a `ParseError` if any error occurs.
+    pub async fn sync_data(&self, stop: Arc<AtomicBool>) -> Result<(), ParseError> {
         for entry in fs::read_dir(self.dir_path).map_err(|_| ParseError::ReadFolderError)? {
+            if stop.load(Ordering::Relaxed) {
+                break;
+            }
+
             let entry = entry.map_err(|_| ParseError::ReadFolderError)?;
             let current_entry_modified = entry
                 .metadata()
@@ -54,6 +66,7 @@ impl<'a> KSMData<'a> {
 
             let path = entry.path();
 
+            // Check if the file has the correct extension
             if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
                 if extension == self.file_extension {
                     if let Some(file_name) = path.file_stem().and_then(|name| name.to_str()) {
@@ -62,7 +75,9 @@ impl<'a> KSMData<'a> {
                             None => SystemTime::UNIX_EPOCH,
                         };
 
+                        // Parse and store the file if it is modified more recently
                         if current_entry_modified > stored_entry_modified {
+                            log::info!("Loading {}...", file_name);
                             let parse_function = self.parse_function;
                             let data_frame = parse_function(path.clone())?;
                             let ksm_file_entry = KSMFile {
@@ -88,10 +103,10 @@ async fn sync_task<'a>(
 ) {
     log::info!("Startup: Entering sync task");
     while !stop.load(Ordering::Relaxed) {
-        if let Err(e) = measurement_data.sync_data().await {
+        if let Err(e) = measurement_data.sync_data(stop.clone()).await {
             log::error!("Error when syncing measurement data: {}", e);
         }
-        if let Err(e) = parameter_data.sync_data().await {
+        if let Err(e) = parameter_data.sync_data(stop.clone()).await {
             log::error!("Error when syncing parameter data: {}", e);
         }
         task::sleep(time::Duration::from_secs(2)).await;
@@ -110,11 +125,18 @@ struct AppState<'a> {
 async fn main() -> tide::Result<()> {
     tide::log::start();
 
+    // Setup signal hook for SIGINT (2)
+    let sigint = Arc::new(AtomicBool::new(false));
+    if signal_hook::flag::register(2, sigint.clone()).is_err() {
+        log::error!("Failed to register SIGINT signal hook");
+        return Ok(());
+    }
+
     // Initialize article parameters struct
     // TODO use environment variables for path
     log::info!("Startup: Reading article parameters");
     let art_data = Arc::new(KSMData::new("./testdata/art", "art", parse_art_file));
-    if let Err(e) = art_data.sync_data().await {
+    if let Err(e) = art_data.sync_data(sigint.clone()).await {
         log::error!("Error when loading article parameters: {}", e);
         return Ok(());
     }
@@ -123,17 +145,13 @@ async fn main() -> tide::Result<()> {
     // TODO use environment variables for path
     log::info!("Startup: Reading measurement data");
     let meas_data = Arc::new(KSMData::new("./testdata/dat", "dat", parse_dat_file));
-    if let Err(e) = meas_data.sync_data().await {
+    if let Err(e) = meas_data.sync_data(sigint.clone()).await {
         log::error!("Error when loading measurement data: {}", e);
         return Ok(());
     }
 
-    // Setup signal hook for SIGINT (2)
-    let sigint = Arc::new(AtomicBool::new(false));
-    if signal_hook::flag::register(2, sigint.clone()).is_err() {
-        log::error!("Failed to register SIGINT signal hook");
-        return Ok(());
-    }
+    log::info!("Done loading data...");
+
 
     //Start data sync task
     let sync_task_handle = task::spawn(sync_task(
