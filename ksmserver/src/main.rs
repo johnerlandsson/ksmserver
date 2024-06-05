@@ -43,10 +43,10 @@ impl<'a> KSMData<'a> {
     }
 
     /// Loads data frames from files in the specified directory and stores them in the concurrent map.
-    pub async fn load_data(&self) -> Result<(), ParseError> {
+    pub async fn sync_data(&self) -> Result<(), ParseError> {
         for entry in fs::read_dir(self.dir_path).map_err(|_| ParseError::ReadFolderError)? {
             let entry = entry.map_err(|_| ParseError::ReadFolderError)?;
-            let modified = entry
+            let current_entry_modified = entry
                 .metadata()
                 .map_err(|_| ParseError::ReadMetadataError)?
                 .modified()
@@ -57,13 +57,20 @@ impl<'a> KSMData<'a> {
             if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
                 if extension == self.file_extension {
                     if let Some(file_name) = path.file_stem().and_then(|name| name.to_str()) {
-                        let parse_function = self.parse_function;
-                        let data_frame = parse_function(path.clone())?;
-                        let ksm_file_entry = KSMFile {
-                            lazyframe: data_frame.lazy(),
-                            modified,
+                        let stored_entry_modified = match self.data.get(file_name) {
+                            Some(ksmfile) => ksmfile.modified,
+                            None => SystemTime::UNIX_EPOCH,
                         };
-                        self.data.insert(file_name.to_owned(), ksm_file_entry);
+
+                        if current_entry_modified > stored_entry_modified {
+                            let parse_function = self.parse_function;
+                            let data_frame = parse_function(path.clone())?;
+                            let ksm_file_entry = KSMFile {
+                                lazyframe: data_frame.lazy(),
+                                modified: current_entry_modified,
+                            };
+                            self.data.insert(file_name.to_owned(), ksm_file_entry);
+                        }
                     } else {
                         return Err(ParseError::FileNameExtractionError);
                     }
@@ -79,10 +86,17 @@ async fn sync_task<'a>(
     measurement_data: Arc<KSMData<'a>>,
     parameter_data: Arc<KSMData<'a>>,
 ) {
+    log::info!("Startup: Entering sync task");
     while !stop.load(Ordering::Relaxed) {
-        log::info!("Sync task");
+        if let Err(e) = measurement_data.sync_data().await {
+            log::error!("Error when syncing measurement data: {}", e);
+        }
+        if let Err(e) = parameter_data.sync_data().await {
+            log::error!("Error when syncing parameter data: {}", e);
+        }
         task::sleep(time::Duration::from_secs(2)).await;
     }
+    log::info!("Sync task finished");
 }
 
 /// Represents the state of the server application, holding shared resources.
@@ -100,7 +114,7 @@ async fn main() -> tide::Result<()> {
     // TODO use environment variables for path
     log::info!("Startup: Reading article parameters");
     let art_data = Arc::new(KSMData::new("./testdata/art", "art", parse_art_file));
-    if let Err(e) = art_data.load_data().await {
+    if let Err(e) = art_data.sync_data().await {
         log::error!("Error when loading article parameters: {}", e);
         return Ok(());
     }
@@ -109,7 +123,7 @@ async fn main() -> tide::Result<()> {
     // TODO use environment variables for path
     log::info!("Startup: Reading measurement data");
     let meas_data = Arc::new(KSMData::new("./testdata/dat", "dat", parse_dat_file));
-    if let Err(e) = meas_data.load_data().await {
+    if let Err(e) = meas_data.sync_data().await {
         log::error!("Error when loading measurement data: {}", e);
         return Ok(());
     }
