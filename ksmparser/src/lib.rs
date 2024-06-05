@@ -81,6 +81,8 @@ pub enum ParseError {
 
     ReadFolderError,
 
+    ReadMetadataError,
+
     FileNameExtractionError,
 
     TypeConversionError(String, String, String),
@@ -119,6 +121,9 @@ impl fmt::Display for ParseError {
             }
             ParseError::ReadFolderError => {
                 write!(f, "Error when interating entries in a folder")
+            }
+            ParseError::ReadMetadataError => {
+                write!(f, "Error when reading metadata for DirEntry")
             }
             ParseError::FileNameExtractionError => {
                 write!(f, "Error when extracting file path")

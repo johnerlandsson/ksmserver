@@ -1,9 +1,9 @@
 use async_std::task;
 use chrono::NaiveDate;
 use dashmap::DashMap;
-use ksmparser::ParseError;
 use ksmparser::article::parse_art_file;
 use ksmparser::measurement::parse_dat_file;
+use ksmparser::ParseError;
 use polars::prelude::*;
 use polars_io::json::JsonWriter;
 use serde::Deserialize;
@@ -13,12 +13,16 @@ use std::fs;
 use std::io::Cursor;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time;
+use std::time::{self, SystemTime};
 use tide::{log, Request, Response, StatusCode};
 
+struct KSMFile {
+    lazyframe: LazyFrame,
+    modified: SystemTime,
+}
 /// Represents a structure that holds and manages data frames loaded from files in the KSM system.
 struct KSMData<'a> {
-    data: DashMap<String, LazyFrame>,
+    data: DashMap<String, KSMFile>,
     dir_path: &'a str,
     file_extension: &'a str,
     parse_function: fn(file_path: PathBuf) -> Result<DataFrame, ParseError>,
@@ -41,14 +45,25 @@ impl<'a> KSMData<'a> {
     /// Loads data frames from files in the specified directory and stores them in the concurrent map.
     pub async fn load_data(&self) -> Result<(), ParseError> {
         for entry in fs::read_dir(self.dir_path).map_err(|_| ParseError::ReadFolderError)? {
-            let path = entry.map_err(|_| ParseError::ReadFolderError)?.path();
+            let entry = entry.map_err(|_| ParseError::ReadFolderError)?;
+            let modified = entry
+                .metadata()
+                .map_err(|_| ParseError::ReadMetadataError)?
+                .modified()
+                .map_err(|_| ParseError::ReadMetadataError)?;
+
+            let path = entry.path();
 
             if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
                 if extension == self.file_extension {
                     if let Some(file_name) = path.file_stem().and_then(|name| name.to_str()) {
                         let parse_function = self.parse_function;
                         let data_frame = parse_function(path.clone())?;
-                        self.data.insert(file_name.to_owned(), data_frame.lazy());
+                        let ksm_file_entry = KSMFile {
+                            lazyframe: data_frame.lazy(),
+                            modified,
+                        };
+                        self.data.insert(file_name.to_owned(), ksm_file_entry);
                     } else {
                         return Err(ParseError::FileNameExtractionError);
                     }
@@ -255,7 +270,7 @@ async fn measurement(req: Request<AppState<'_>>) -> tide::Result {
     };
 
     let lazyframe = match data.data.get(key) {
-        Some(df) => df.clone(),
+        Some(ksmfile) => ksmfile.lazyframe.clone(),
         None => {
             log::error!("Invalid parameter entry requested: {}", key);
             let response_string = format!("Parameter entry not found: {}", key);
@@ -323,7 +338,7 @@ async fn parameters(req: Request<AppState<'_>>) -> tide::Result {
     };
 
     let lazyframe = match data.data.get(key) {
-        Some(df) => df.clone(),
+        Some(ksmfile) => ksmfile.lazyframe.clone(),
         None => {
             log::error!("Invalid parameter entry requested: {}", key);
             let response_string = format!("Parameter entry not found: {}", key);
