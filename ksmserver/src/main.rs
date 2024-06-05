@@ -1,22 +1,24 @@
+use async_std::task;
 use chrono::NaiveDate;
 use dashmap::DashMap;
-use ksmparser::ParseError;
 use ksmparser::article::parse_art_file;
 use ksmparser::measurement::parse_dat_file;
+use ksmparser::ParseError;
 use polars::prelude::*;
 use polars_io::json::JsonWriter;
 use serde::Deserialize;
+use signal_hook;
 use std::fmt;
 use std::fs;
 use std::io::Cursor;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tide::{log, Request, Response, StatusCode};
-//use async_std::task;
 
 /// Represents a structure that holds and manages data frames loaded from files in the KSM system.
 struct KSMData<'a> {
-    data: DashMap<String, LazyFrame>, 
-    dir_path: &'a str, 
+    data: DashMap<String, LazyFrame>,
+    dir_path: &'a str,
     file_extension: &'a str,
     parse_function: fn(file_path: PathBuf) -> Result<DataFrame, ParseError>,
 }
@@ -28,7 +30,7 @@ impl<'a> KSMData<'a> {
         parse_function: fn(file_path: PathBuf) -> Result<DataFrame, ParseError>,
     ) -> Self {
         KSMData {
-            data: DashMap::new(),  
+            data: DashMap::new(),
             dir_path,
             file_extension,
             parse_function,
@@ -40,7 +42,8 @@ impl<'a> KSMData<'a> {
         for entry in fs::read_dir(self.dir_path).map_err(|_| ParseError::ReadFolderError)? {
             let path = entry.map_err(|_| ParseError::ReadFolderError)?.path();
 
-            if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) { if extension == self.file_extension {
+            if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
+                if extension == self.file_extension {
                     if let Some(file_name) = path.file_stem().and_then(|name| name.to_str()) {
                         let parse_function = self.parse_function;
                         let data_frame = parse_function(path.clone())?;
@@ -52,6 +55,16 @@ impl<'a> KSMData<'a> {
             }
         }
         Ok(())
+    }
+}
+
+async fn sync_task<'a>(
+    stop: Arc<AtomicBool>,
+    measurement_data: Arc<KSMData<'a>>,
+    parameter_data: Arc<KSMData<'a>>,
+) {
+    while !stop.load(Ordering::Relaxed) {
+        log::info!("Sync task");
     }
 }
 
@@ -67,6 +80,7 @@ async fn main() -> tide::Result<()> {
     tide::log::start();
 
     // Initialize article parameters struct
+    // TODO use environment variables for path
     log::info!("Startup: Reading article parameters");
     let art_data = Arc::new(KSMData::new("./testdata/art", "art", parse_art_file));
     if let Err(e) = art_data.load_data().await {
@@ -74,8 +88,8 @@ async fn main() -> tide::Result<()> {
         return Ok(());
     }
 
-
     // Initialize measurement data struct
+    // TODO use environment variables for path
     log::info!("Startup: Reading measurement data");
     let meas_data = Arc::new(KSMData::new("./testdata/dat", "dat", parse_dat_file));
     if let Err(e) = meas_data.load_data().await {
@@ -83,17 +97,38 @@ async fn main() -> tide::Result<()> {
         return Ok(());
     }
 
+    // Setup signal hook for SIGINT (2)
+    let sigint = Arc::new(AtomicBool::new(false));
+    if signal_hook::flag::register(2, sigint.clone()).is_err() {
+        log::error!("Failed to register SIGINT signal hook");
+        return Ok(());
+    }
+
+    //Start data sync task
+    let sync_task_handle = task::spawn(sync_task(
+        sigint.clone(),
+        meas_data.clone(),
+        art_data.clone(),
+    ));
+
+    //Setup shared resources
     let state = AppState {
         measurement_data: meas_data.clone(),
         parameter_data: art_data.clone(),
     };
 
+    //Create server object
     let mut server = tide::with_state(state);
 
+    //Setup endpoints
     server.at("/measurement/:name").get(measurement);
     server.at("/parameters/:name").get(parameters);
 
+    //Start server
     server.listen("127.0.0.1:8080").await?;
+
+    //Wait for sync task to finish for graceful exit
+    sync_task_handle.await;
 
     Ok(())
 }
@@ -326,4 +361,3 @@ async fn parameters(req: Request<AppState<'_>>) -> tide::Result {
 
     Ok(dataframe_to_json_response(&mut dataframe))
 }
-
