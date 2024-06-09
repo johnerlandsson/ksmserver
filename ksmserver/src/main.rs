@@ -45,16 +45,15 @@ async fn main() -> tide::Result<()> {
     }
 
     // Initialize article parameters struct
-    log::info!("Startup: Reading article parameters");
+    log::info!("Startup: Reading article parameters from {}", env.art_path);
     let art_data = Arc::new(KSMData::new(env.art_path, "art", parse_art_file));
-    //let art_data = Arc::new(KSMData::new("./testdata/art", "art", parse_art_file));
     if let Err(e) = art_data.sync_data(sigint.clone()).await {
         log::error!("Error when loading article parameters: {}", e);
         return Ok(());
     }
 
     // Initialize measurement data struct
-    log::info!("Startup: Reading measurement data");
+    log::info!("Startup: Reading measurement data from {}", env.dat_path);
     let meas_data = Arc::new(KSMData::new(env.dat_path, "dat", parse_dat_file));
     if let Err(e) = meas_data.sync_data(sigint.clone()).await {
         log::error!("Error when loading measurement data: {}", e);
@@ -79,6 +78,7 @@ async fn main() -> tide::Result<()> {
 
     //Create server object
     let mut server = tide::with_state(state);
+    server.with(tide::log::LogMiddleware::new());
 
     //Setup endpoints
     server.at("/measurement/:name").get(measurement);
@@ -199,8 +199,8 @@ async fn measurement(req: Request<AppState<'_>>) -> tide::Result {
     let lazyframe = match data.data.get(key) {
         Some(ksmfile) => ksmfile.lazyframe.clone(),
         None => {
-            log::error!("Invalid parameter entry requested: {}", key);
-            let response_string = format!("Parameter entry not found: {}", key);
+            log::error!("Invalid measurement entry requested: {}", key);
+            let response_string = format!("Measurement entry not found: {}", key);
             return Ok(plain_response(
                 StatusCode::InternalServerError,
                 response_string.as_str(),

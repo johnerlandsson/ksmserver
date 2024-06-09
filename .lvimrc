@@ -1,0 +1,1 @@
+nnoremap <F6> :VimuxRunCommand("BIND_ADDRESS=127.0.0.1:8080 KSM_ART_PATH=./testdata/art KSM_DAT_PATH=./testdata/dat cargo run")<CR>
