@@ -7,7 +7,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 use tide::log;
 use std::env;
+use std::fmt;
 
+/// Represents the environment variables for this application
 pub struct Environment {
     pub bind_addr: String,
     pub art_path: String,
@@ -15,6 +17,7 @@ pub struct Environment {
 }
 
 impl Environment {
+    // Read environment variables
     pub fn new() -> Environment {
         Environment {
             bind_addr: env::var("BIND_ADDRESS").unwrap_or(String::from("127.0.0.1:8080")),
@@ -23,6 +26,24 @@ impl Environment {
         }
     }
 }
+
+pub enum KSMError {
+    DateCreationError { date: String, reason: String },
+}
+
+impl fmt::Display for KSMError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            KSMError::DateCreationError {
+                ref date,
+                ref reason,
+            } => {
+                write!(f, "Error creating date '{}': {}", date, reason)
+            }
+        }
+    }
+}
+
 
 /// Represents the state of the server application, holding shared resources.
 #[derive(Clone)]

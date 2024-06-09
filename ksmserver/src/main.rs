@@ -2,12 +2,11 @@ use async_std::task;
 use chrono::NaiveDate;
 use ksmparser::article::parse_art_file;
 use ksmparser::measurement::parse_dat_file;
-use ksmserver::{KSMData, AppState, Environment};
+use ksmserver::{KSMData, AppState, Environment, KSMError};
 use polars::prelude::*;
 use polars_io::json::JsonWriter;
 use serde::Deserialize;
 use signal_hook;
-use std::fmt;
 use std::io::Cursor;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time;
@@ -128,22 +127,6 @@ fn plain_response(code: StatusCode, msg: &str) -> tide::Response {
         .build()
 }
 
-enum KSMError {
-    DateCreationError { date: String, reason: String },
-}
-
-impl fmt::Display for KSMError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match *self {
-            KSMError::DateCreationError {
-                ref date,
-                ref reason,
-            } => {
-                write!(f, "Error creating date '{}': {}", date, reason)
-            }
-        }
-    }
-}
 
 fn filter_dataframe_by_measure_time(
     lazyframe: LazyFrame,
