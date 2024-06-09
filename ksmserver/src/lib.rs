@@ -6,6 +6,23 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::SystemTime;
 use tide::log;
+use std::env;
+
+pub struct Environment {
+    pub bind_addr: String,
+    pub art_path: String,
+    pub dat_path: String,
+}
+
+impl Environment {
+    pub fn new() -> Environment {
+        Environment {
+            bind_addr: env::var("BIND_ADDRESS").unwrap_or(String::from("127.0.0.1:8080")),
+            art_path: env::var("KSM_ART_PATH").unwrap_or(String::from(".")).to_owned(),
+            dat_path: env::var("KSM_DAT_PATH").unwrap_or(String::from(".")).to_owned(),
+        }
+    }
+}
 
 /// Represents the state of the server application, holding shared resources.
 #[derive(Clone)]
