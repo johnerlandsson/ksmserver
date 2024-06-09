@@ -2,11 +2,12 @@ use async_std::task;
 use chrono::NaiveDate;
 use ksmparser::article::parse_art_file;
 use ksmparser::measurement::parse_dat_file;
-use ksmserver::KSMData;
+use ksmserver::{KSMData, AppState};
 use polars::prelude::*;
 use polars_io::json::JsonWriter;
 use serde::Deserialize;
 use signal_hook;
+use std::env;
 use std::fmt;
 use std::io::Cursor;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -31,13 +32,6 @@ async fn sync_task<'a>(
     log::info!("Sync task finished");
 }
 
-/// Represents the state of the server application, holding shared resources.
-#[derive(Clone)]
-struct AppState<'a> {
-    measurement_data: Arc<KSMData<'a>>,
-    parameter_data: Arc<KSMData<'a>>,
-}
-
 #[async_std::main]
 async fn main() -> tide::Result<()> {
     tide::log::start();
@@ -49,19 +43,35 @@ async fn main() -> tide::Result<()> {
         return Ok(());
     }
 
+    // Read path of art files from environment variable
+    let art_path = match env::var("KSM_ART_PATH") {
+        Ok(path) => path,
+        Err(_) => {
+            tide::log::error!("Error reading KSM_ART_PATH environment variable");
+            return Ok(());
+        }
+    };
     // Initialize article parameters struct
-    // TODO use environment variables for path
     log::info!("Startup: Reading article parameters");
-    let art_data = Arc::new(KSMData::new("./testdata/art", "art", parse_art_file));
+    let art_data = Arc::new(KSMData::new(art_path, "art", parse_art_file));
+    //let art_data = Arc::new(KSMData::new("./testdata/art", "art", parse_art_file));
     if let Err(e) = art_data.sync_data(sigint.clone()).await {
         log::error!("Error when loading article parameters: {}", e);
         return Ok(());
     }
 
+    // Read path of dat files from environment variable
+    let dat_path = match env::var("KSM_DAT_PATH") {
+        Ok(path) => path,
+        Err(_) => {
+            tide::log::error!("Error reading KSM_DAT_PATH environment variable");
+            return Ok(());
+        }
+    };
     // Initialize measurement data struct
     // TODO use environment variables for path
     log::info!("Startup: Reading measurement data");
-    let meas_data = Arc::new(KSMData::new("./testdata/dat", "dat", parse_dat_file));
+    let meas_data = Arc::new(KSMData::new(dat_path, "dat", parse_dat_file));
     if let Err(e) = meas_data.sync_data(sigint.clone()).await {
         log::error!("Error when loading measurement data: {}", e);
         return Ok(());
