@@ -1,0 +1,12 @@
+FROM rust:1.77
+
+WORKDIR /usr/src/ksmserver
+COPY . .
+
+RUN cargo build -r
+
+CMD ["target/release/ksmserver"]
+
+ENV BIND_ADDRESS="127.0.0.1:8080"
+ENV KSM_ART_PATH="./testdata/art" 
+ENV KSM_DAT_PATH="./testdata/dat" 
