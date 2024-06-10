@@ -6,7 +6,6 @@ use ksmserver::{KSMData, AppState, Environment, KSMError};
 use polars::prelude::*;
 use polars_io::json::JsonWriter;
 use serde::Deserialize;
-use signal_hook;
 use std::io::Cursor;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time;
@@ -37,17 +36,13 @@ async fn main() -> tide::Result<()> {
     // Read environment variables
     let env = Environment::new();
 
-    // Setup signal hook for SIGINT (2)
-    let sigint = Arc::new(AtomicBool::new(false));
-    if signal_hook::flag::register(2, sigint.clone()).is_err() {
-        log::error!("Failed to register SIGINT signal hook");
-        return Ok(());
-    }
+    // Create stop flag
+    let stop_task: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
 
     // Initialize article parameters struct
     log::info!("Startup: Reading article parameters from {}", env.art_path);
     let art_data = Arc::new(KSMData::new(env.art_path, "art", parse_art_file));
-    if let Err(e) = art_data.sync_data(sigint.clone()).await {
+    if let Err(e) = art_data.sync_data(stop_task.clone()).await {
         log::error!("Error when loading article parameters: {}", e);
         return Ok(());
     }
@@ -55,7 +50,7 @@ async fn main() -> tide::Result<()> {
     // Initialize measurement data struct
     log::info!("Startup: Reading measurement data from {}", env.dat_path);
     let meas_data = Arc::new(KSMData::new(env.dat_path, "dat", parse_dat_file));
-    if let Err(e) = meas_data.sync_data(sigint.clone()).await {
+    if let Err(e) = meas_data.sync_data(stop_task.clone()).await {
         log::error!("Error when loading measurement data: {}", e);
         return Ok(());
     }
@@ -65,7 +60,7 @@ async fn main() -> tide::Result<()> {
 
     //Start data sync task
     let sync_task_handle = task::spawn(sync_task(
-        sigint.clone(),
+        stop_task.clone(),
         meas_data.clone(),
         art_data.clone(),
     ));
@@ -86,6 +81,7 @@ async fn main() -> tide::Result<()> {
 
     //Start server
     server.listen(env.bind_addr).await?;
+    stop_task.store(true, Ordering::Relaxed);
 
     //Wait for sync task to finish for graceful exit
     sync_task_handle.await;
