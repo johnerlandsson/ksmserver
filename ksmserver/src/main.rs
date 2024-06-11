@@ -38,25 +38,20 @@ async fn main() -> tide::Result<()> {
 
     // Create stop flag
     let stop_task: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+    if signal_hook::flag::register(signal_hook::consts::SIGTERM, stop_task.clone()).is_err() {
+        log::error!("Failed to register SIGTERM signal");
+        return Ok(());
+    }
+    if signal_hook::flag::register(signal_hook::consts::SIGINT, stop_task.clone()).is_err() {
+        log::error!("Failed to register SIGINT signal");
+        return Ok(());
+    }
 
     // Initialize article parameters struct
-    log::info!("Startup: Reading article parameters from {}", env.art_path);
     let art_data = Arc::new(KSMData::new(env.art_path, "art", parse_art_file));
-    if let Err(e) = art_data.sync_data(stop_task.clone()).await {
-        log::error!("Error when loading article parameters: {}", e);
-        return Ok(());
-    }
-
+    //
     // Initialize measurement data struct
-    log::info!("Startup: Reading measurement data from {}", env.dat_path);
     let meas_data = Arc::new(KSMData::new(env.dat_path, "dat", parse_dat_file));
-    if let Err(e) = meas_data.sync_data(stop_task.clone()).await {
-        log::error!("Error when loading measurement data: {}", e);
-        return Ok(());
-    }
-
-    log::info!("Done loading data...");
-
 
     //Start data sync task
     let sync_task_handle = task::spawn(sync_task(
@@ -80,11 +75,12 @@ async fn main() -> tide::Result<()> {
     server.at("/parameters/:name").get(parameters);
 
     //Start server
-    server.listen(env.bind_addr).await?;
-    stop_task.store(true, Ordering::Relaxed);
+    let _ = task::spawn(server.listen(env.bind_addr));
 
     //Wait for sync task to finish for graceful exit
     sync_task_handle.await;
+
+    log::info!("Exiting...");
 
     Ok(())
 }
