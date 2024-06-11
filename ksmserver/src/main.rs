@@ -29,6 +29,20 @@ async fn sync_task<'a>(
     log::info!("Sync task finished");
 }
 
+fn create_stop_flag() -> Option<Arc<AtomicBool>> {
+    let stop_flag: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+    if signal_hook::flag::register(signal_hook::consts::SIGTERM, stop_flag.clone()).is_err() {
+        log::error!("Failed to register SIGTERM signal");
+        return None;
+    }
+    if signal_hook::flag::register(signal_hook::consts::SIGINT, stop_flag.clone()).is_err() {
+        log::error!("Failed to register SIGINT signal");
+        return None;
+    }
+
+    Some(stop_flag)
+}
+
 #[async_std::main]
 async fn main() -> tide::Result<()> {
     tide::log::start();
@@ -37,25 +51,17 @@ async fn main() -> tide::Result<()> {
     let env = Environment::new();
 
     // Create stop flag
-    let stop_task: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
-    if signal_hook::flag::register(signal_hook::consts::SIGTERM, stop_task.clone()).is_err() {
-        log::error!("Failed to register SIGTERM signal");
-        return Ok(());
-    }
-    if signal_hook::flag::register(signal_hook::consts::SIGINT, stop_task.clone()).is_err() {
-        log::error!("Failed to register SIGINT signal");
-        return Ok(());
-    }
-
-    // Initialize article parameters struct
+    let stop_flag = match create_stop_flag() {
+        Some(flag) => flag,
+        None => return Ok(()),
+    };
+    // Create KSMData structs for measurement and parameter data
     let art_data = Arc::new(KSMData::new(env.art_path, "art", parse_art_file));
-    //
-    // Initialize measurement data struct
     let meas_data = Arc::new(KSMData::new(env.dat_path, "dat", parse_dat_file));
 
     //Start data sync task
     let sync_task_handle = task::spawn(sync_task(
-        stop_task.clone(),
+        stop_flag.clone(),
         meas_data.clone(),
         art_data.clone(),
     ));
