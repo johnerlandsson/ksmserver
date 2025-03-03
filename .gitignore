@@ -13,3 +13,4 @@ ksmserver/src/.main.rs.swo
 ksmserver/src/.lib.rs.swp
 Dockerfile
 .Dockerfile.swp
+.docker-compose.yml.swp

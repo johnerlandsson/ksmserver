@@ -8,6 +8,7 @@ use std::fmt;
 use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use regex::Regex;
 
 /// Reads lines from a given file and decodes them using the ISO_8859_10 encoding.
 ///
@@ -33,18 +34,23 @@ fn parse_folder<P: AsRef<Path>>(
     file_extension: &str,
 ) -> Result<HashMap<String, DataFrame>, ParseError> {
     let mut map: HashMap<String, DataFrame> = HashMap::new();
+
+    //Compile regex pattern for filename
+    let pattern_string = format!(r"^\d{{3,5}}(-\d)?{}$", regex::escape(file_extension));
+    let filename_pattern = Regex::new(&pattern_string).map_err(|_| ParseError::InvalidRegex)?;
+
+    //Iterate files in directory
     for entry in fs::read_dir(dir).map_err(|_| ParseError::ReadFolderError)? {
         let path = entry.map_err(|_| ParseError::ReadFolderError)?.path();
 
-        if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
-            if extension == file_extension {
-                if let Some(file_name) = path.file_stem().and_then(|name| name.to_str()) {
-                    let data_frame = parse_function(path.clone())?;
-                    map.insert(file_name.to_owned(), data_frame);
-                } else {
-                    return Err(ParseError::FileNameExtractionError);
-                }
+        if let Some(file_name) = path.file_name().and_then(|name| name.to_str()) {
+            //Check if filename matches pattern
+            if filename_pattern.is_match(file_name) {
+                let data_frame = parse_function(path.clone())?;
+                map.insert(file_name.to_owned(), data_frame);
             }
+        } else {
+            return Err(ParseError::FileNameExtractionError);
         }
     }
     Ok(map)
@@ -90,6 +96,8 @@ pub enum ParseError {
     ColumnMismatchError,
 
     DuplicateColumns,
+
+    InvalidRegex,
 }
 
 impl fmt::Display for ParseError {
@@ -136,6 +144,9 @@ impl fmt::Display for ParseError {
             }
             ParseError::DuplicateColumns => {
                 write!(f, "Duplicate columns")
+            }
+            ParseError::InvalidRegex => {
+                write!(f, "Invalid Regex")
             }
         }
     }

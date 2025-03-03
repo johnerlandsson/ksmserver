@@ -244,7 +244,7 @@ fn read_measurement_entries(
         //Read values row into string
         let values_row = match lines_res.next().transpose() {
             Ok(Some(line)) => line,
-            Ok(None) => return Err(ParseError::MalformedEntry(column_row)),
+            Ok(None) => return Err(ParseError::MalformedEntry(String::from("No value row after column row"))),
             Err(e) => return Err(ParseError::IOError(e.to_string())),
         };
 

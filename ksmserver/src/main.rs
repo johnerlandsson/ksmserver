@@ -198,7 +198,7 @@ async fn measurement(req: Request<AppState<'_>>) -> tide::Result {
         Some(ksmfile) => ksmfile.lazyframe.clone(),
         None => {
             log::error!("Invalid measurement entry requested: {}", key);
-            let response_string = format!("Measurement entry not found: {}", key);
+            let response_string = format!("Measurement file not found: {}", key);
             return Ok(plain_response(
                 StatusCode::InternalServerError,
                 response_string.as_str(),

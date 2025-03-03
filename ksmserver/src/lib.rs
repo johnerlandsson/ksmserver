@@ -8,6 +8,7 @@ use std::time::SystemTime;
 use tide::log;
 use std::env;
 use std::fmt;
+use regex::Regex;
 
 /// Represents the environment variables for this application
 pub struct Environment {
@@ -82,12 +83,16 @@ impl<'a> KSMData<'a> {
     /// Loads data frames from files in the specified directory and stores them in the concurrent map.
     ///
     /// This function reads the directory specified by `dir_path`, checks each file for the specified `file_extension`,
-    /// and parses the file if it is modified more recently than the stored version. The parsed data frame is stored
-    /// in a concurrent map with the file name as the key.
+    /// ensures that the filename follows a specific pattern and parses the file if it is modified more recently than 
+    /// the stored version. The parsed data frame is stored in a concurrent map with the file name as the key.
     ///
     /// # Returns
     /// A `Result` which is `Ok(())` if all files are processed successfully, or a `ParseError` if any error occurs.
     pub async fn sync_data(&self, stop: Arc<AtomicBool>) -> Result<(), ParseError> {
+    //Compile regex pattern for filename
+    let pattern_string = format!(r"^\d{{3,5}}(-\d)?\.{}$", regex::escape(self.file_extension));
+    let filename_pattern = Regex::new(&pattern_string).map_err(|_| ParseError::InvalidRegex)?;
+
         for entry in fs::read_dir(&self.dir_path).map_err(|_| ParseError::ReadFolderError)? {
             if stop.load(Ordering::Relaxed) {
                 break;
@@ -102,30 +107,27 @@ impl<'a> KSMData<'a> {
 
             let path = entry.path();
 
-            // Check if the file has the correct extension
-            if let Some(extension) = path.extension().and_then(|ext| ext.to_str()) {
-                if extension == self.file_extension {
-                    if let Some(file_name) = path.file_stem().and_then(|name| name.to_str()) {
-                        let stored_entry_modified = match self.data.get(file_name) {
-                            Some(ksmfile) => ksmfile.modified,
-                            None => SystemTime::UNIX_EPOCH,
-                        };
+            if let Some(file_name) = path.file_name().and_then(|name| name.to_str()) {
+                if filename_pattern.is_match(file_name) {
+                    let stored_entry_modified = match self.data.get(file_name) {
+                        Some(ksmfile) => ksmfile.modified,
+                        None => SystemTime::UNIX_EPOCH,
+                    };
 
-                        // Parse and store the file if it is modified more recently
-                        if current_entry_modified > stored_entry_modified {
-                            log::info!("Loading {}...", file_name);
-                            let parse_function = self.parse_function;
-                            let data_frame = parse_function(path.clone())?;
-                            let ksm_file_entry = KSMFile {
-                                lazyframe: data_frame.lazy(),
-                                modified: current_entry_modified,
-                            };
-                            self.data.insert(file_name.to_owned(), ksm_file_entry);
-                        }
-                    } else {
-                        return Err(ParseError::FileNameExtractionError);
+                    // Parse and store the file if it is modified more recently
+                    if current_entry_modified > stored_entry_modified {
+                        log::info!("Loading {}...", file_name);
+                        let parse_function = self.parse_function;
+                        let data_frame = parse_function(path.clone())?;
+                        let ksm_file_entry = KSMFile {
+                            lazyframe: data_frame.lazy(),
+                            modified: current_entry_modified,
+                        };
+                        self.data.insert(file_name.to_owned(), ksm_file_entry);
                     }
                 }
+            } else {
+                return Err(ParseError::FileNameExtractionError);
             }
         }
         Ok(())
