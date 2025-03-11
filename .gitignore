@@ -14,3 +14,17 @@ ksmserver/src/.lib.rs.swp
 Dockerfile
 .Dockerfile.swp
 .docker-compose.yml.swp
+massif.out.166194 massif.out.166775 massif.out.167315 massif.out.175449 massif.out.19181 massif.out.35023 massif.out.39393 massif.out.46665 massif.out.8207 massif.out.8268 massif.out.8684
+massif.out.166194
+massif.out.166775
+massif.out.167315
+massif.out.175449
+massif.out.19181
+massif.out.35023
+massif.out.39393
+massif.out.46665
+massif.out.8207
+massif.out.8268
+massif.out.8684
+dhat-heap.json
+dbgenv.sh

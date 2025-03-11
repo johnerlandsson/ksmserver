@@ -55,10 +55,10 @@ pub struct AppState<'a> {
 
 /// Represents a structure for storing the contents of a KSMFile and its modification time
 pub struct KSMFile {
-    pub lazyframe: LazyFrame,
+    pub dataframe: DataFrame,
     modified: SystemTime,
 }
-/// Represents a structure that holds and manages lazy-loaded data frames loaded from files in the KSM system.
+/// Represents a structure that holds and manages data frames loaded from files in the KSM system.
 pub struct KSMData<'a> {
     pub data: DashMap<String, KSMFile>,
     dir_path: String,
@@ -120,7 +120,7 @@ impl<'a> KSMData<'a> {
                         let parse_function = self.parse_function;
                         let data_frame = parse_function(path.clone())?;
                         let ksm_file_entry = KSMFile {
-                            lazyframe: data_frame.lazy(),
+                            dataframe: data_frame.clone(),
                             modified: current_entry_modified,
                         };
                         self.data.insert(file_name.to_owned(), ksm_file_entry);

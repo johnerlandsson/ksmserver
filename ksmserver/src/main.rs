@@ -24,6 +24,19 @@ async fn sync_task<'a>(
         if let Err(e) = parameter_data.sync_data(stop.clone()).await {
             log::error!("Error when syncing parameter data: {}", e);
         }
+        //TODO debug
+        println!("Number of keys in measurement_data: {}", measurement_data.data.len());
+
+        let mut total_size = 0;
+        for entry in measurement_data.data.iter() {
+            let k = entry.key();
+            let dfsize = entry.value().dataframe.estimated_size();
+            println!("KSM file: {}, size: {}B", k, dfsize);
+            total_size += dfsize;
+        }
+        println!("Total size: {}Kb", total_size / 1024);
+
+        //TODO end debug
         task::sleep(time::Duration::from_secs(2)).await;
     }
     log::info!("Sync task finished");
@@ -195,7 +208,7 @@ async fn measurement(req: Request<AppState<'_>>) -> tide::Result {
     };
 
     let lazyframe = match data.data.get(key) {
-        Some(ksmfile) => ksmfile.lazyframe.clone(),
+        Some(ksmfile) => ksmfile.dataframe.clone().lazy(),
         None => {
             log::error!("Invalid measurement entry requested: {}", key);
             let response_string = format!("Measurement file not found: {}", key);
@@ -263,7 +276,7 @@ async fn parameters(req: Request<AppState<'_>>) -> tide::Result {
     };
 
     let lazyframe = match data.data.get(key) {
-        Some(ksmfile) => ksmfile.lazyframe.clone(),
+        Some(ksmfile) => ksmfile.dataframe.clone().lazy(),
         None => {
             log::error!("Invalid parameter entry requested: {}", key);
             let response_string = format!("Parameter entry not found: {}", key);
