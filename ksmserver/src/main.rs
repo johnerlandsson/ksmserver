@@ -2,7 +2,7 @@ use async_std::task;
 use chrono::NaiveDate;
 use ksmparser::article::parse_art_file;
 use ksmparser::measurement::parse_dat_file;
-use ksmserver::{KSMData, AppState, Environment, KSMError};
+use ksmserver::{AppState, Environment, KSMData, KSMError};
 use polars::prelude::*;
 use polars_io::json::JsonWriter;
 use serde::Deserialize;
@@ -83,6 +83,9 @@ async fn main() -> tide::Result<()> {
     //Setup endpoints
     server.at("/measurement/:name").get(measurement);
     server.at("/parameters/:name").get(parameters);
+    server
+        .at("/views/parameter_resistance")
+        .get(view_parameter_resistance);
 
     //Start server
     let _ = task::spawn(server.listen(env.bind_addr));
@@ -128,7 +131,6 @@ fn plain_response(code: StatusCode, msg: &str) -> tide::Response {
         .content_type(tide::http::mime::PLAIN)
         .build()
 }
-
 
 fn filter_dataframe_by_measure_time(
     lazyframe: LazyFrame,
@@ -306,4 +308,39 @@ async fn parameters(req: Request<AppState<'_>>) -> tide::Result {
     };
 
     Ok(dataframe_to_json_response(&mut dataframe))
+}
+
+async fn view_parameter_resistance(req: Request<AppState<'_>>) -> tide::Result {
+    let mut resistances: Vec<(String, String)> = Vec::new();
+    let parameter_data = &req.state().parameter_data;
+    for entry in parameter_data.data.iter() {
+        let lazyframe = entry.value().dataframe.clone().lazy();
+        let collected = match lazyframe
+            .select([col("info6"), col("check_user2_maxlimit")])
+            .collect()
+        {
+            Ok(df) => df,
+            Err(_) => continue,
+        };
+        let art_no = format!("{:0>5}", first_value_or_empty_string(&collected, "info6"));
+        let resistance = first_value_or_empty_string(&collected, "check_user2_maxlimit");
+        resistances.push((art_no, resistance));
+    }
+    let json_string = match serde_json::to_string(&resistances) {
+        Ok(val) => val,
+        Err(_) => return Ok(plain_response(StatusCode::InternalServerError, "Error converting to json")),
+    };
+    return Ok(plain_response(StatusCode::Ok, &json_string));
+}
+
+fn first_value_or_empty_string(df: &DataFrame, column_name: &str) -> String {
+    match df.column(column_name) {
+        Ok(column) => {
+            match column.str() {
+                Ok(strval) => strval.get(0).unwrap_or_default().to_string(),
+                Err(_) => String::new(),
+            }
+        },
+        Err(_) => String::new(),
+    }
 }
