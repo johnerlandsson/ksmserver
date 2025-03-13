@@ -45,9 +45,10 @@ fn read_article_parameters(
             // Trim whitespace from the program name
             let pgm_name = pgm_name.trim();
             // Store the valid program name in the parameters map and remove it from the lines
-            let series = Series::new("pgm_name", &[pgm_name]);
+            //let series = Series::new(PlSmallStr::from_str("pgm_name"), &[pgm_name]);
+            let column: Column = Column::new(PlSmallStr::from_str("pgm_name"), [pgm_name]);
             dataframe = dataframe
-                .hstack(&[series])
+                .hstack(&[column])
                 .map_err(|_| ParseError::SeriesCreationError)?;
         }
         Some(Err(e)) => return Err(ParseError::IOError(e.to_string())),
@@ -80,9 +81,9 @@ fn read_article_parameters(
         match line.split_once(" = ") {
             Some((key, value)) => {
                 // Trim and insert the parsed key and value into the parameters map
-                let series = Series::new(key.trim(), &[value.trim()]);
+                let column = Column::new(PlSmallStr::from_str(key.trim()), [value.trim()]);
                 dataframe = dataframe
-                    .hstack(&[series])
+                    .hstack(&[column])
                     .map_err(|_| ParseError::SeriesCreationError)?;
             }
             None => {
@@ -91,7 +92,7 @@ fn read_article_parameters(
             }
         }
     }
-
+    dataframe.shrink_to_fit();
     Ok(dataframe)
 }
 

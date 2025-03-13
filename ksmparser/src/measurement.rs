@@ -43,7 +43,7 @@ fn add_null_columns(dataframe: &mut DataFrame, column_names: &Vec<String>) -> Po
             None => &DataType::String,
         };
         // Creating a full null column for each column name provided
-        let null_column = Series::full_null(&column_name, dataframe.height(), dtype);
+        let null_column = Column::full_null(PlSmallStr::from_string(column_name.clone()), dataframe.height(), dtype);
         // Appending the null column to the dataframe
         dataframe.with_column(null_column)?;
     }
@@ -84,10 +84,17 @@ fn align_dataframes_and_insert_row(
 /// # Returns
 /// A PolarsResult containing the updated DataFrame or an error.
 fn align_and_insert_row(
-    main_dataframe: &mut DataFrame,
+    main_dataframe: &DataFrame,
     new_data_row: &DataFrame,
 ) -> PolarsResult<DataFrame> {
-    let aligned_row = new_data_row.select(main_dataframe.get_column_names())?;
+    //select needs vec of owned PlSmallStr's
+    //TODO is this the best way?
+    let column_names: Vec<PlSmallStr> = main_dataframe.get_column_names()
+        .iter()
+        .map(|s| PlSmallStr::from_str(s.as_str()))
+        .collect();
+    let aligned_row = new_data_row.select(column_names)?;
+    //TODO This is where all excessive memory allocation happens
     main_dataframe.vstack(&aligned_row)
 }
 
@@ -103,30 +110,30 @@ fn align_and_insert_row(
 /// # Returns
 /// * `PolarsResult<DataFrame>` - Returns a DataFrame constructed from the provided columns and values if successful.
 ///   Returns a `PolarsError` if the DataFrame could not be successfully constructed (e.g., mismatch in the number of columns and values).
-fn create_dataframe_from_columns_and_values(
+pub fn create_dataframe_from_columns_and_values(
     columns: &str,
     values: &str,
 ) -> Result<DataFrame, ParseError> {
-    let columns_vec: Vec<&str> = columns.split("\t").collect();
-    let values_vec: Vec<&str> = values.split("\t").collect();
+    let col_str_vec: Vec<&str> = columns.split("\t").collect();
+    let val_str_vec: Vec<&str> = values.split("\t").collect();
 
-    if columns_vec.len() != values_vec.len() {
+    if col_str_vec.len() != val_str_vec.len() {
         return Err(ParseError::ColumnMismatchError);
     }
 
-    let mut series_vec = Vec::new();
-    for (column, value) in columns_vec.into_iter().zip(values_vec.into_iter()) {
+    let mut column_vec = Vec::new();
+    for (column, value) in col_str_vec.into_iter().zip(val_str_vec.into_iter()) {
         let column = column.trim().trim_matches('"');
         let data_type = match COLUMN_DTYPE.get(column) {
             Some(t) => t,
             None => &DataType::String,
         };
 
-        let series = parse_series(column, value, data_type);
-        series_vec.push(series);
+        let column = parse_column(column, value, data_type);
+        column_vec.push(column);
     }
 
-    match DataFrame::new(series_vec) {
+    match DataFrame::new(column_vec) {
         Ok(df) => Ok(df),
         Err(e) => {
             match e {
@@ -151,36 +158,36 @@ fn create_dataframe_from_columns_and_values(
 /// A `Result` that is either:
 /// - `Ok(Series)` - A new Series with the parsed value if successful.
 /// - `Err(PolarsError)` - An error if the parsing fails.
-fn parse_series(column: &str, value: &str, data_type: &DataType) -> Series {
+fn parse_column(column: &str, value: &str, data_type: &DataType) -> Column {
     match data_type {
         DataType::Float64 => {
             match value.parse::<f64>() {
-                Ok(parsed_value) => Series::new(column, &[parsed_value]),
-                Err(_) => Series::full_null(column, 1, data_type),
+                Ok(parsed_value) => Column::new(PlSmallStr::from_str(column), [parsed_value]),
+                Err(_) => Column::full_null(PlSmallStr::from_str(column), 1, data_type),
             }
         },
         // Similar parsing process for Float32.
         DataType::Float32 => {
             match value.parse::<f32>() {
-                Ok(parsed_value) => Series::new(column, &[parsed_value]),
-                Err(_) => Series::full_null(column, 1, data_type),
+                Ok(parsed_value) => Column::new(PlSmallStr::from_str(column), [parsed_value]),
+                Err(_) => Column::full_null(PlSmallStr::from_str(column), 1, data_type),
             }
         },
         // Similar parsing process for Int64.
         DataType::Int64 => {
             match value.parse::<i64>() {
-                Ok(parsed_value) => Series::new(column, &[parsed_value]),
-                Err(_) => Series::full_null(column, 1, data_type),
+                Ok(parsed_value) => Column::new(PlSmallStr::from_str(column), [parsed_value]),
+                Err(_) => Column::full_null(PlSmallStr::from_str(column), 1, data_type),
             }
         },
         // Similar parsing process for Int32.
         DataType::Int32 => {
             match value.parse::<i32>() {
-                Ok(parsed_value) => Series::new(column, &[parsed_value]),
-                Err(_) => Series::full_null(column, 1, data_type),
+                Ok(parsed_value) => Column::new(PlSmallStr::from_str(column), [parsed_value]),
+                Err(_) => Column::full_null(PlSmallStr::from_str(column), 1, data_type),
             }
         },
-        _ => Series::new(column, &[value]),
+        _ => Column::new(PlSmallStr::from_str(column), [value]),
     }
 }
 
@@ -192,7 +199,7 @@ fn parse_series(column: &str, value: &str, data_type: &DataType) -> Series {
 ///
 /// # Returns
 /// A tuple of vectors containing unique column names not found in each other's lists
-fn find_column_name_differences(a: &[&str], b: &[&str]) -> (Vec<String>, Vec<String>) {
+fn find_column_name_differences(a: &Vec<&PlSmallStr>, b: &Vec<&PlSmallStr>) -> (Vec<String>, Vec<String>) {
     let set_a: HashSet<_> = a.iter().collect();
     let set_b: HashSet<_> = b.iter().collect();
 
@@ -265,6 +272,7 @@ fn read_measurement_entries(
             Err(_) => return Err(ParseError::DataAlignmentError),
         }
     }
+    dataframe.shrink_to_fit();
     Ok(dataframe)
 }
 

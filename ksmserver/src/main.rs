@@ -10,6 +10,10 @@ use std::io::Cursor;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time;
 use tide::{log, Request, Response, StatusCode};
+//use tikv_jemallocator::Jemalloc;
+
+//#[global_allocator]
+//static GLOBAL: Jemalloc = Jemalloc;
 
 async fn sync_task<'a>(
     stop: Arc<AtomicBool>,
@@ -24,19 +28,6 @@ async fn sync_task<'a>(
         if let Err(e) = parameter_data.sync_data(stop.clone()).await {
             log::error!("Error when syncing parameter data: {}", e);
         }
-        //TODO debug
-        println!("Number of keys in measurement_data: {}", measurement_data.data.len());
-
-        let mut total_size = 0;
-        for entry in measurement_data.data.iter() {
-            let k = entry.key();
-            let dfsize = entry.value().dataframe.estimated_size();
-            println!("KSM file: {}, size: {}B", k, dfsize);
-            total_size += dfsize;
-        }
-        println!("Total size: {}Kb", total_size / 1024);
-
-        //TODO end debug
         task::sleep(time::Duration::from_secs(2)).await;
     }
     log::info!("Sync task finished");
@@ -194,7 +185,7 @@ struct MeasurementQuery {
     columns: Option<String>,       // Optional comma-separated string of columns to select
 }
 async fn measurement(req: Request<AppState<'_>>) -> tide::Result {
-    // Deserialize the query parameters into the MeasurementQuery struct
+    //Deserialize the query parameters into the MeasurementQuery struct
     let query: MeasurementQuery = req.query()?;
     let data = &req.state().measurement_data;
 
