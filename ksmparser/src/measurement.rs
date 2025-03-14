@@ -94,7 +94,6 @@ fn align_and_insert_row(
         .map(|s| PlSmallStr::from_str(s.as_str()))
         .collect();
     let aligned_row = new_data_row.select(column_names)?;
-    //TODO This is where all excessive memory allocation happens
     main_dataframe.vstack(&aligned_row)
 }
 

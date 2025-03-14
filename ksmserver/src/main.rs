@@ -86,6 +86,9 @@ async fn main() -> tide::Result<()> {
     server
         .at("/views/parameter_resistance")
         .get(view_parameter_resistance);
+    server
+        .at("/views/operator_measurement")
+        .get(view_operator_measurement);
 
     //Start server
     let _ = task::spawn(server.listen(env.bind_addr));
@@ -310,7 +313,7 @@ async fn parameters(req: Request<AppState<'_>>) -> tide::Result {
     Ok(dataframe_to_json_response(&mut dataframe))
 }
 
-/// Provides a list of the resistance parameter for all .art files. 
+/// Provides a list of the resistance parameter for all .art files.
 /// Formatted as a list of article number / resistance pairs
 async fn view_parameter_resistance(req: Request<AppState<'_>>) -> tide::Result {
     let mut resistances: Vec<(String, String)> = Vec::new();
@@ -334,7 +337,12 @@ async fn view_parameter_resistance(req: Request<AppState<'_>>) -> tide::Result {
     // Serialize the collected resistance data to a JSON string.
     let json_string = match serde_json::to_string(&resistances) {
         Ok(val) => val,
-        Err(_) => return Ok(plain_response(StatusCode::InternalServerError, "Error converting to json")),
+        Err(_) => {
+            return Ok(plain_response(
+                StatusCode::InternalServerError,
+                "Error converting to json",
+            ))
+        }
     };
 
     return Ok(plain_response(StatusCode::Ok, &json_string));
@@ -348,9 +356,85 @@ fn first_value_or_empty_string(df: &DataFrame, column_name: &str) -> String {
             // Attempt to retrieve string values from the column.
             match column.str() {
                 Ok(strval) => strval.get(0).unwrap_or_default().to_string(),
-                Err(_) => String::new(),  // Return an empty string on error accessing strings.
+                Err(_) => String::new(), // Return an empty string on error accessing strings.
             }
-        },
-        Err(_) => String::new(),  // Return an empty string if the column is not found.
+        }
+        Err(_) => String::new(), // Return an empty string if the column is not found.
     }
+}
+//
+// Defines a structure to parse query parameters from a request.
+#[derive(Deserialize, Debug)]
+struct ViewOperatorMeasurementQuery {
+    start_date: Option<NaiveDate>, // Optional start date for filtering dataframe
+    end_date: Option<NaiveDate>,   // Optional end date for filtering dataframe
+}
+
+async fn view_operator_measurement(req: Request<AppState<'_>>) -> tide::Result {
+    let query: ViewOperatorMeasurementQuery = req.query()?;
+    let data = &req.state().measurement_data;
+    let mut result_df = DataFrame::default();
+    let column_names = "info6,info4,info5,measure_time1970".to_string();
+
+    for art_entry in data.data.iter() {
+        //Read article dataframe as lazyframe
+        let lazy = art_entry.dataframe.clone().lazy();
+
+        // Filter the dataframe by measure time using provided start and end dates
+        let lazy = match filter_dataframe_by_measure_time(
+            lazy,
+            query.start_date.unwrap_or(NaiveDate::MIN),
+            query.end_date.unwrap_or(NaiveDate::MAX),
+        ) {
+            Ok(df) => df,
+            Err(e) => {
+                // Return InternalServerError if there is an error in filtering
+                return Ok(plain_response(
+                    StatusCode::InternalServerError,
+                    e.to_string().as_str(),
+                ));
+            }
+        };
+        // Process the optional column filtering
+        let dataframe = match select_dataframe_columns(lazy, column_names.as_str()) {
+            Ok(df) => df,
+            Err(e) => match e {
+                PolarsError::ColumnNotFound(..) => {
+                    // Return BadRequest if specified column doesn't exist
+                    return Ok(plain_response(StatusCode::BadRequest, "Column not found"));
+                }
+                _ => {
+                    // Return InternalServerError for other column-related errors
+                    return Ok(plain_response(
+                        StatusCode::InternalServerError,
+                        format!("Column errror {:?}", e.to_string()).as_str(),
+                    ));
+                }
+            },
+        };
+
+        result_df = match result_df.vstack(&dataframe) {
+            Ok(df) => df,
+            Err(_) => {
+                return Ok(plain_response(
+                    StatusCode::InternalServerError,
+                    "Error when appending data",
+                ));
+            }
+        };
+    }
+    if let Err(e) = result_df.set_column_names([
+        PlSmallStr::from_str("artno"),
+        PlSmallStr::from_str("machine"),
+        PlSmallStr::from_str("operator"),
+        PlSmallStr::from_str("time"),
+    ]) {
+        let msg = format!("{}", e);
+        return Ok(plain_response(
+            StatusCode::InternalServerError,
+            msg.as_str(),
+        ));
+    }
+
+    Ok(dataframe_to_json_response(&mut result_df))
 }
