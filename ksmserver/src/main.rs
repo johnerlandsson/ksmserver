@@ -310,9 +310,12 @@ async fn parameters(req: Request<AppState<'_>>) -> tide::Result {
     Ok(dataframe_to_json_response(&mut dataframe))
 }
 
+/// Provides a list of the resistance parameter for all .art files. 
+/// Formatted as a list of article number / resistance pairs
 async fn view_parameter_resistance(req: Request<AppState<'_>>) -> tide::Result {
     let mut resistances: Vec<(String, String)> = Vec::new();
     let parameter_data = &req.state().parameter_data;
+    //Iterate over all .art files
     for entry in parameter_data.data.iter() {
         let lazyframe = entry.value().dataframe.clone().lazy();
         let collected = match lazyframe
@@ -322,25 +325,32 @@ async fn view_parameter_resistance(req: Request<AppState<'_>>) -> tide::Result {
             Ok(df) => df,
             Err(_) => continue,
         };
+        //Read conductor resistance and article number columns
         let art_no = format!("{:0>5}", first_value_or_empty_string(&collected, "info6"));
         let resistance = first_value_or_empty_string(&collected, "check_user2_maxlimit");
+        // Push values to resulting Vec
         resistances.push((art_no, resistance));
     }
+    // Serialize the collected resistance data to a JSON string.
     let json_string = match serde_json::to_string(&resistances) {
         Ok(val) => val,
         Err(_) => return Ok(plain_response(StatusCode::InternalServerError, "Error converting to json")),
     };
+
     return Ok(plain_response(StatusCode::Ok, &json_string));
 }
 
+/// Returns the first value from a specified column in a data frame, or an empty string if not available.
 fn first_value_or_empty_string(df: &DataFrame, column_name: &str) -> String {
+    // Attempt to access the specified column in the data frame.
     match df.column(column_name) {
         Ok(column) => {
+            // Attempt to retrieve string values from the column.
             match column.str() {
                 Ok(strval) => strval.get(0).unwrap_or_default().to_string(),
-                Err(_) => String::new(),
+                Err(_) => String::new(),  // Return an empty string on error accessing strings.
             }
         },
-        Err(_) => String::new(),
+        Err(_) => String::new(),  // Return an empty string if the column is not found.
     }
 }
