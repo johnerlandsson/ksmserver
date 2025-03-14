@@ -4,12 +4,12 @@
 ///
 /// Functions included handle reading from files, parsing content, and validating
 /// program names and key-value pair arrangements within the given article files.
-use super::{ParseError, parse_folder};
+use super::{parse_folder, ParseError};
 use crate::read_and_decode_lines;
 use polars::prelude::*;
 use std::collections::HashMap;
-use std::path::Path;
 use std::io;
+use std::path::Path;
 
 /// Parses article parameters from an iterator over lines of text, producing a DataFrame.
 ///
@@ -32,7 +32,7 @@ use std::io;
 /// The function can return the following errors:
 /// - `ParseError::IOError(String)`: When the function encounters an IO error from the input iterator.
 /// - `ParseError::MissingField(String)`: If a required field such as the "pgm_name" or a "None" terminator is missing.
-/// - `ParseError::SeriesCreationError`: If there is an error adding a new Series to the DataFrame.
+/// - `ParseError::ColumnCreationError`: If there is an error adding a new Column to the DataFrame.
 /// - `ParseError::MalformedEntry(String)`: If a line cannot be parsed into a valid key-value format.
 fn read_article_parameters(
     mut line_res: impl Iterator<Item = io::Result<String>>,
@@ -45,18 +45,16 @@ fn read_article_parameters(
             // Trim whitespace from the program name
             let pgm_name = pgm_name.trim();
             // Store the valid program name in the parameters map and remove it from the lines
-            //let series = Series::new(PlSmallStr::from_str("pgm_name"), &[pgm_name]);
             let column: Column = Column::new(PlSmallStr::from_str("pgm_name"), [pgm_name]);
             dataframe = dataframe
                 .hstack(&[column])
-                .map_err(|_| ParseError::SeriesCreationError)?;
+                .map_err(|_| ParseError::ColumnCreationError)?;
         }
         Some(Err(e)) => return Err(ParseError::IOError(e.to_string())),
         None => return Err(ParseError::MissingField(String::from("pgm_name"))),
     }
 
     // Return an error if the "None" line is missing
-    //TODO investigate what this is
     match line_res.next() {
         Some(Ok(line)) => {
             if line.trim() != "None" {
@@ -84,7 +82,7 @@ fn read_article_parameters(
                 let column = Column::new(PlSmallStr::from_str(key.trim()), [value.trim()]);
                 dataframe = dataframe
                     .hstack(&[column])
-                    .map_err(|_| ParseError::SeriesCreationError)?;
+                    .map_err(|_| ParseError::ColumnCreationError)?;
             }
             None => {
                 // Return an error if a line does not contain a valid key-value format
@@ -92,7 +90,7 @@ fn read_article_parameters(
             }
         }
     }
-    dataframe.shrink_to_fit();
+    dataframe.shrink_to_fit(); // Not shrinking causes extreme bloating
     Ok(dataframe)
 }
 
@@ -115,17 +113,17 @@ fn read_article_parameters(
 /// # Errors
 /// - `InvalidFile`: If the specified file could not be read or decoded.
 /// - Additionally includes all errors thrown by `read_article_parameters`.
-pub fn parse_art_file<P: AsRef<Path>>(
-    file_path: P,
-) -> Result<DataFrame, ParseError> {
+pub fn parse_art_file<P: AsRef<Path>>(file_path: P) -> Result<DataFrame, ParseError> {
     match read_and_decode_lines(&file_path) {
         // Attempt to read article parameters from the decoded lines
         Ok(lines) => read_article_parameters(lines),
         // Return an error if the file could not be read and decoded
-        Err(_) => Err(ParseError::InvalidFile(file_path.as_ref().to_string_lossy().into_owned())),
+        Err(_) => Err(ParseError::InvalidFile(
+            file_path.as_ref().to_string_lossy().into_owned(),
+        )),
     }
 }
 
-pub fn parse_art_folder<P: AsRef<Path>> (dir: P) -> Result<HashMap<String, DataFrame>, ParseError> {
+pub fn parse_art_folder<P: AsRef<Path>>(dir: P) -> Result<HashMap<String, DataFrame>, ParseError> {
     parse_folder(dir, parse_art_file, "art")
 }

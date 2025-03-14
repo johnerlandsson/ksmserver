@@ -144,19 +144,19 @@ pub fn create_dataframe_from_columns_and_values(
     }
 }
 
-/// Parses a string value into a Series of specified data type.
+/// Parses a string value into a Column of specified data type.
 ///
-/// This function reads a string value and tries to parse and convert it into a Series
+/// This function reads a string value and tries to parse and convert it into a Column
 /// of a specific DataType. It covers parsing for common numerical types and dates.
 ///
 /// # Arguments
 /// * `column` - A string slice that holds the name of the column to which the value belongs.
-/// * `value` - A string slice representing the value to be parsed into a Series.
-/// * `data_type` - The desired DataType of the Series after parsing the value.
+/// * `value` - A string slice representing the value to be parsed into a Column.
+/// * `data_type` - The desired DataType of the Column after parsing the value.
 ///
 /// # Returns
 /// A `Result` that is either:
-/// - `Ok(Series)` - A new Series with the parsed value if successful.
+/// - `Ok(Column)` - A new Column with the parsed value if successful.
 /// - `Err(PolarsError)` - An error if the parsing fails.
 fn parse_column(column: &str, value: &str, data_type: &DataType) -> Column {
     match data_type {
@@ -272,7 +272,7 @@ fn read_measurement_entries(
             Err(_) => return Err(ParseError::DataAlignmentError),
         }
     }
-    dataframe.shrink_to_fit();
+    dataframe.shrink_to_fit(); // Not shrinking causes extreme bloating
     Ok(dataframe)
 }
 
