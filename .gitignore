@@ -30,3 +30,12 @@ dhat-heap.json
 dbgenv.sh
 testdatalarge
 resistance.json
+flamegraph.svg
+massif.out.193705
+massif.out.196046
+massif.out.196204
+massif.out.199723
+massif.out.200220
+perf.data
+perf.data.old
+tmp.json

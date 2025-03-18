@@ -1,5 +1,5 @@
 use async_std::task;
-use chrono::NaiveDate;
+use chrono::{FixedOffset, NaiveDate, LocalResult};
 use ksmparser::article::parse_art_file;
 use ksmparser::measurement::parse_dat_file;
 use ksmserver::{AppState, Environment, KSMData, KSMError};
@@ -135,29 +135,56 @@ fn plain_response(code: StatusCode, msg: &str) -> tide::Response {
         .build()
 }
 
+/// Helper function to convert a NaiveDate to an epoch timestamp
+fn naive_date_to_epoch(
+    date: &NaiveDate,
+    hour: u32,
+    minute: u32,
+    second: u32,
+) -> Result<i64, KSMError> {
+    //Convert NaiveDate to NaiveDateTime
+    let datetime = match date.and_hms_opt(hour, minute, second) {
+        Some(dt) => dt,
+        None => {
+            return Err(KSMError::DateCreationError {
+                date: date.to_string(),
+                reason: "Converting date to datetime".to_string(),
+            })
+        }
+    };
+    // Create offset for adjusting to GMT+1
+    let offset = match FixedOffset::east_opt(3600) {
+        Some(offs) => offs,
+        None => {
+            return Err(KSMError::DateCreationError {
+                date: date.to_string(),
+                reason: "Creating offset".to_string(),
+            })
+        }
+    };
+
+    let datetime = match datetime.and_local_timezone(offset) {
+        LocalResult::Single(datetime_fixed) => datetime_fixed,
+        _ => {
+            return Err(KSMError::DateCreationError { 
+                date: date.to_string(), 
+                reason: "Adding offset".to_string() })
+        }
+    };
+
+    Ok(datetime.timestamp())
+}
+
 fn filter_dataframe_by_measure_time(
     lazyframe: LazyFrame,
     start_date: NaiveDate,
     end_date: NaiveDate,
 ) -> Result<LazyFrame, KSMError> {
     // Convert the start date to a timestamp at the beginning of the day (midnight)
-    let start = start_date
-        .and_hms_opt(0, 0, 0)
-        .map(|dt| dt.and_utc().timestamp())
-        .ok_or_else(|| KSMError::DateCreationError {
-            date: start_date.to_string(),
-            reason: "Invalid start date time combination".to_string(),
-        })?;
-
+    let start = naive_date_to_epoch(&start_date, 0, 0, 0)?;
     // Convert the end date to a timestamp at the end of the day (one second before midnight)
-    let end = end_date
-        .and_hms_opt(23, 59, 59)
-        .map(|dt| dt.and_utc().timestamp())
-        .ok_or_else(|| KSMError::DateCreationError {
-            date: start_date.to_string(),
-            reason: "Invalid end date time combination".to_string(),
-        })?;
-
+    let end = naive_date_to_epoch(&end_date, 23, 59, 59)?;
+    log::info!("start: {} end: {}", start, end);
     // Create filter expressions for data after the start date and before the end date
     let start = col("measure_time1970").gt_eq(start);
     let end = col("measure_time1970").lt_eq(end);
