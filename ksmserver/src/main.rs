@@ -1,5 +1,5 @@
 use async_std::task;
-use chrono::{FixedOffset, NaiveDate, LocalResult};
+use chrono::NaiveDate;
 use ksmparser::article::parse_art_file;
 use ksmparser::measurement::parse_dat_file;
 use ksmserver::{AppState, Environment, KSMData, KSMError};
@@ -152,27 +152,8 @@ fn naive_date_to_epoch(
             })
         }
     };
-    // Create offset for adjusting to GMT+1
-    let offset = match FixedOffset::east_opt(3600) {
-        Some(offs) => offs,
-        None => {
-            return Err(KSMError::DateCreationError {
-                date: date.to_string(),
-                reason: "Creating offset".to_string(),
-            })
-        }
-    };
 
-    let datetime = match datetime.and_local_timezone(offset) {
-        LocalResult::Single(datetime_fixed) => datetime_fixed,
-        _ => {
-            return Err(KSMError::DateCreationError { 
-                date: date.to_string(), 
-                reason: "Adding offset".to_string() })
-        }
-    };
-
-    Ok(datetime.timestamp())
+    Ok(datetime.and_utc().timestamp())
 }
 
 fn filter_dataframe_by_measure_time(
@@ -406,6 +387,8 @@ async fn view_operator_measurement(req: Request<AppState<'_>>) -> tide::Result {
     for art_entry in data.data.iter() {
         //Read article dataframe as lazyframe
         let lazy = art_entry.dataframe.clone().lazy();
+        //Adjust to GMT+1
+        let lazy = lazy.with_column(col("measure_time1970") + lit(3600));
 
         // Filter the dataframe by measure time using provided start and end dates
         let lazy = match filter_dataframe_by_measure_time(
