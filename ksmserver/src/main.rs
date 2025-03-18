@@ -405,7 +405,7 @@ async fn view_operator_measurement(req: Request<AppState<'_>>) -> tide::Result {
                 ));
             }
         };
-        // Process the optional column filtering
+        // Process the column filtering
         let dataframe = match select_dataframe_columns(lazy, column_names.as_str()) {
             Ok(df) => df,
             Err(e) => match e {
@@ -438,8 +438,9 @@ async fn view_operator_measurement(req: Request<AppState<'_>>) -> tide::Result {
         PlSmallStr::from_str("machine"),
         PlSmallStr::from_str("operator"),
         PlSmallStr::from_str("time"),
+        PlSmallStr::from_str("result"),
     ]) {
-        let msg = format!("{}", e);
+        let msg = format!("Error when setting column names {}", e);
         return Ok(plain_response(
             StatusCode::InternalServerError,
             msg.as_str(),
