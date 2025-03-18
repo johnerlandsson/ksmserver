@@ -382,7 +382,7 @@ async fn view_operator_measurement(req: Request<AppState<'_>>) -> tide::Result {
     let query: ViewOperatorMeasurementQuery = req.query()?;
     let data = &req.state().measurement_data;
     let mut result_df = DataFrame::default();
-    let column_names = "info6,info4,info5,measure_time1970".to_string();
+    let column_names = "info6,info4,info5,measure_time1970,checkresult".to_string();
 
     for art_entry in data.data.iter() {
         //Read article dataframe as lazyframe
