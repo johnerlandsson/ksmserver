@@ -8,6 +8,7 @@ services:
     environment:
       KSM_ART_PATH: "/mnt/ksm/art" 
       KSM_DAT_PATH: "/mnt/ksm/data" 
+      TIMEZONE: "Europe/Stockholm"
     volumes:
       - /mnt/testksm:/mnt/ksm
     networks:

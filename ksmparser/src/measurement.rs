@@ -3,6 +3,7 @@ use crate::read_and_decode_lines;
 use lazy_static::lazy_static;
 use polars::prelude::*;
 use std::collections::{HashMap, HashSet};
+use std::env;
 use std::io;
 use std::path::Path;
 
@@ -43,7 +44,11 @@ fn add_null_columns(dataframe: &mut DataFrame, column_names: &Vec<String>) -> Po
             None => &DataType::String,
         };
         // Creating a full null column for each column name provided
-        let null_column = Column::full_null(PlSmallStr::from_string(column_name.clone()), dataframe.height(), dtype);
+        let null_column = Column::full_null(
+            PlSmallStr::from_string(column_name.clone()),
+            dataframe.height(),
+            dtype,
+        );
         // Appending the null column to the dataframe
         dataframe.with_column(null_column)?;
     }
@@ -89,7 +94,8 @@ fn align_and_insert_row(
 ) -> PolarsResult<DataFrame> {
     //select needs vec of owned PlSmallStr's
     //TODO is this the best way?
-    let column_names: Vec<PlSmallStr> = main_dataframe.get_column_names()
+    let column_names: Vec<PlSmallStr> = main_dataframe
+        .get_column_names()
         .iter()
         .map(|s| PlSmallStr::from_str(s.as_str()))
         .collect();
@@ -134,12 +140,10 @@ pub fn create_dataframe_from_columns_and_values(
 
     match DataFrame::new(column_vec) {
         Ok(df) => Ok(df),
-        Err(e) => {
-            match e {
-                PolarsError::Duplicate(_) => Err(ParseError::DuplicateColumns),
-                _ => Err(ParseError::DataFrameCreationError),
-            }
-        }
+        Err(e) => match e {
+            PolarsError::Duplicate(_) => Err(ParseError::DuplicateColumns),
+            _ => Err(ParseError::DataFrameCreationError),
+        },
     }
 }
 
@@ -159,32 +163,24 @@ pub fn create_dataframe_from_columns_and_values(
 /// - `Err(PolarsError)` - An error if the parsing fails.
 fn parse_column(column: &str, value: &str, data_type: &DataType) -> Column {
     match data_type {
-        DataType::Float64 => {
-            match value.parse::<f64>() {
-                Ok(parsed_value) => Column::new(PlSmallStr::from_str(column), [parsed_value]),
-                Err(_) => Column::full_null(PlSmallStr::from_str(column), 1, data_type),
-            }
+        DataType::Float64 => match value.parse::<f64>() {
+            Ok(parsed_value) => Column::new(PlSmallStr::from_str(column), [parsed_value]),
+            Err(_) => Column::full_null(PlSmallStr::from_str(column), 1, data_type),
         },
         // Similar parsing process for Float32.
-        DataType::Float32 => {
-            match value.parse::<f32>() {
-                Ok(parsed_value) => Column::new(PlSmallStr::from_str(column), [parsed_value]),
-                Err(_) => Column::full_null(PlSmallStr::from_str(column), 1, data_type),
-            }
+        DataType::Float32 => match value.parse::<f32>() {
+            Ok(parsed_value) => Column::new(PlSmallStr::from_str(column), [parsed_value]),
+            Err(_) => Column::full_null(PlSmallStr::from_str(column), 1, data_type),
         },
         // Similar parsing process for Int64.
-        DataType::Int64 => {
-            match value.parse::<i64>() {
-                Ok(parsed_value) => Column::new(PlSmallStr::from_str(column), [parsed_value]),
-                Err(_) => Column::full_null(PlSmallStr::from_str(column), 1, data_type),
-            }
+        DataType::Int64 => match value.parse::<i64>() {
+            Ok(parsed_value) => Column::new(PlSmallStr::from_str(column), [parsed_value]),
+            Err(_) => Column::full_null(PlSmallStr::from_str(column), 1, data_type),
         },
         // Similar parsing process for Int32.
-        DataType::Int32 => {
-            match value.parse::<i32>() {
-                Ok(parsed_value) => Column::new(PlSmallStr::from_str(column), [parsed_value]),
-                Err(_) => Column::full_null(PlSmallStr::from_str(column), 1, data_type),
-            }
+        DataType::Int32 => match value.parse::<i32>() {
+            Ok(parsed_value) => Column::new(PlSmallStr::from_str(column), [parsed_value]),
+            Err(_) => Column::full_null(PlSmallStr::from_str(column), 1, data_type),
         },
         _ => Column::new(PlSmallStr::from_str(column), [value]),
     }
@@ -198,7 +194,10 @@ fn parse_column(column: &str, value: &str, data_type: &DataType) -> Column {
 ///
 /// # Returns
 /// A tuple of vectors containing unique column names not found in each other's lists
-fn find_column_name_differences(a: &Vec<&PlSmallStr>, b: &Vec<&PlSmallStr>) -> (Vec<String>, Vec<String>) {
+fn find_column_name_differences(
+    a: &Vec<&PlSmallStr>,
+    b: &Vec<&PlSmallStr>,
+) -> (Vec<String>, Vec<String>) {
     let set_a: HashSet<_> = a.iter().collect();
     let set_b: HashSet<_> = b.iter().collect();
 
@@ -250,7 +249,11 @@ fn read_measurement_entries(
         //Read values row into string
         let values_row = match lines_res.next().transpose() {
             Ok(Some(line)) => line,
-            Ok(None) => return Err(ParseError::MalformedEntry(String::from("No value row after column row"))),
+            Ok(None) => {
+                return Err(ParseError::MalformedEntry(String::from(
+                    "No value row after column row",
+                )))
+            }
             Err(e) => return Err(ParseError::IOError(e.to_string())),
         };
 
@@ -260,7 +263,7 @@ fn read_measurement_entries(
             Err(e) => {
                 match e {
                     //Ignore entries with duplicate column names
-                    ParseError::DuplicateColumns => continue, 
+                    ParseError::DuplicateColumns => continue,
                     _ => return Err(e),
                 }
             }
@@ -271,7 +274,47 @@ fn read_measurement_entries(
             Err(_) => return Err(ParseError::DataAlignmentError),
         }
     }
+    let mut dataframe = add_local_datetime_column(dataframe)?;
     dataframe.shrink_to_fit(); // Not shrinking causes extreme bloating
+    Ok(dataframe)
+}
+
+/// Converts the epoch time from the 'measure_time1970' column of a DataFrame
+/// into a local DateTime based on the timezone specified in the environment variable 'TIMEZONE'.
+/// Adds the resulting DateTime as a new column 'local_time' to the DataFrame.
+///
+/// # Parameters
+/// - `dataframe`: A DataFrame containing a 'measure_time1970' column with epoch times.
+///
+/// # Returns
+/// - `Result<DataFrame, ParseError>`: The modified DataFrame with the new 'local_time' column,
+///   or a `ParseError` if there is an error during the conversion.
+///
+/// # Behavior
+/// - The function reads the timezone from the 'TIMEZONE' environment variable,
+///   defaults to "Europe/Stockholm" if not set, and converts the epoch time into a
+///   local DateTime in the specified timezone.
+fn add_local_datetime_column(mut dataframe: DataFrame) -> Result<DataFrame, ParseError> {
+    //Read timezone from environment variable
+    let timezone = env::var("TIMEZONE").unwrap_or(String::from("Europe/Stockholm"));
+
+    //Create local_time column
+    dataframe = match dataframe
+        .lazy()
+        .with_columns([(col("measure_time1970") * lit(1000))
+            .cast(DataType::Datetime(
+                TimeUnit::Milliseconds,
+                Some("UTC".into()),
+            ))
+            .dt()
+            .convert_time_zone(PlSmallStr::from_string(timezone))
+            .alias("local_time")])
+        .collect()
+    {
+        Ok(df) => df,
+        Err(e) => return Err(ParseError::EpochToDatetime(e.to_string())),
+    };
+
     Ok(dataframe)
 }
 

@@ -98,6 +98,8 @@ pub enum ParseError {
     DuplicateColumns,
 
     InvalidRegex,
+
+    EpochToDatetime(String),
 }
 
 impl fmt::Display for ParseError {
@@ -147,6 +149,9 @@ impl fmt::Display for ParseError {
             }
             ParseError::InvalidRegex => {
                 write!(f, "Invalid Regex")
+            }
+            ParseError::EpochToDatetime(line) => {
+                write!(f, "Error converting epoch column to datetime: {}", line)
             }
         }
     }

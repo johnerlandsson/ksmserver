@@ -6,7 +6,7 @@ version = "0.1.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-polars = {version = "0.46.0", features = ["temporal"] }
+polars = {version = "0.46.0", features = ["temporal", "timezones"] }
 encoding_rs = "0.8.35"
 encoding_rs_io = "0.1.7"
 lazy_static = "1.5.0"
